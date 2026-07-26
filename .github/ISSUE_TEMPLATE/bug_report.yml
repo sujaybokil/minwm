@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible minwm problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        minwm is a work in progress. Please include a minimal reproduction and review logs before posting them.
+  - type: input
+    id: version
+    attributes:
+      label: minwm version
+      placeholder: 0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows and monitor setup
+      placeholder: Windows 11 24H2, 2560x1440 at 125%
+    validations:
+      required: true
+  - type: input
+    id: application
+    attributes:
+      label: Affected application
+      placeholder: Discord 1.0.x
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Describe the smallest reliable reproduction.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant debug log
+      description: Enable `--debug true`; remove unrelated or sensitive lines.
+      render: text

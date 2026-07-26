@@ -1,0 +1,11 @@
+/dist/
+
+*.log
+*.bak
+*.ahk.bak
+*.tmp
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
