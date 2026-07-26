@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 
 #Include "%A_ScriptDir%\..\lib\geometry.ahk"
+#Include "%A_ScriptDir%\..\lib\window-rules.ahk"
 #Include "%A_ScriptDir%\..\lib\constraints.ahk"
 
 try {
@@ -78,6 +79,23 @@ RunGeometryTests() {
     if CalculateFocusBorderRects(
         RectFromXYWH(0, 0, 100, 100), 0).Length
         throw Error("zero-width focus border should be disabled")
+
+    normalWindowStyle := 0x16CF0000
+    if HasDialogOrPopupSemantics(
+        normalWindowStyle, 0, "Chrome_WidgetWin_0", 0)
+        throw Error("normal Electron windows must remain eligible")
+    if !HasDialogOrPopupSemantics(
+        normalWindowStyle | 0x80000000, 0, "Popup", 0)
+        throw Error("WS_POPUP windows must be excluded")
+    if !HasDialogOrPopupSemantics(
+        normalWindowStyle, 0, "Chrome_WidgetWin_0", 123)
+        throw Error("owned transient windows must be excluded")
+    if !HasDialogOrPopupSemantics(
+        normalWindowStyle, 0x1, "CustomDialog", 0)
+        throw Error("modal-frame windows must be excluded")
+    if !HasDialogOrPopupSemantics(
+        normalWindowStyle, 0, "#32770", 0)
+        throw Error("standard dialog classes must be excluded")
 
     if !RectsMatch(
         { left: 9, top: 11, right: 109, bottom: 111 },

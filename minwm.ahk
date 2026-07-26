@@ -5,6 +5,7 @@
 #Include "lib\config-validation.ahk"
 #Include "lib\debug.ahk"
 #Include "lib\geometry.ahk"
+#Include "lib\window-rules.ahk"
 #Include "lib\windows.ahk"
 #Include "lib\focus-border.ahk"
 #Include "lib\constraints.ahk"

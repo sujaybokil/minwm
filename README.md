@@ -75,6 +75,10 @@ installed it another way.
 All bindings are configurable in `config.toml`. Restart minwm after editing the
 file.
 
+Only normal, resizable, unowned top-level windows are tiled. Standard dialogs,
+modal frames, tool windows, owned transient windows, and `WS_POPUP` windows are
+always excluded.
+
 | Default | Action |
 | --- | --- |
 | `Win+T` | Cycle vertical, horizontal, and floating layouts |

@@ -23,19 +23,33 @@ if ([version]$actualVersion -lt [version]$requiredVersion -or
     throw "AutoHotkey $requiredVersion or newer v2 is required; found $actualVersion."
 }
 
-& $AutoHotkeyPath /force /ErrorStdOut /Validate (Join-Path $projectRoot 'minwm.ahk')
-if ($LASTEXITCODE -ne 0) {
-    throw "AutoHotkey syntax validation failed with exit code $LASTEXITCODE."
+function Invoke-AutoHotkey([string[]]$Arguments, [string]$FailureMessage) {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $AutoHotkeyPath
+    $startInfo.UseShellExecute = $false
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) {
+        throw "$FailureMessage with exit code $($process.ExitCode)."
+    }
 }
 
-& $AutoHotkeyPath /force /ErrorStdOut (Join-Path $projectRoot 'minwm.ahk') --check
-if ($LASTEXITCODE -ne 0) {
-    throw "Module and configuration smoke test failed with exit code $LASTEXITCODE."
-}
+Invoke-AutoHotkey `
+    @('/force', '/ErrorStdOut', '/Validate', (Join-Path $projectRoot 'minwm.ahk')) `
+    'AutoHotkey syntax validation failed'
 
-& $AutoHotkeyPath /force /ErrorStdOut (Join-Path $projectRoot 'tests\geometry-tests.ahk')
-if ($LASTEXITCODE -ne 0) {
-    throw "Unit tests failed with exit code $LASTEXITCODE."
-}
+Invoke-AutoHotkey `
+    @('/force', '/ErrorStdOut', (Join-Path $projectRoot 'minwm.ahk'), '--check') `
+    'Module and configuration smoke test failed'
+
+Invoke-AutoHotkey `
+    @('/force', '/ErrorStdOut', (Join-Path $projectRoot 'tests\geometry-tests.ahk')) `
+    'Unit tests failed'
 
 Write-Host "Validation and unit tests passed with AutoHotkey $actualVersion."

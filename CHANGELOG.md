@@ -14,6 +14,7 @@ All notable changes to minwm will be documented here. The project follows
 - Tray controls, configurable hotkeys, and opt-in diagnostic logging.
 - Current-user installer with optional startup-at-logon registration.
 - Configurable click-through focused-window border.
+- Explicit exclusion of owned windows, dialogs, modal frames, and popups.
 - Syntax validation, unit tests, and Windows CI.
 
 ### Changed

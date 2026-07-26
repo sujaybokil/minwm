@@ -163,12 +163,17 @@ IsEligibleWindow(hwnd) {
 
         style := WinGetStyle(title)
         exStyle := WinGetExStyle(title)
-        if !(style & 0x10000000) || (exStyle & 0x80) ; WS_VISIBLE / WS_EX_TOOLWINDOW
+        if !(style & 0x10000000) ; WS_VISIBLE
+            return false
+        className := WinGetClass(title)
+        ownerHwnd := DllCall(
+            "User32\GetWindow", "ptr", hwnd, "uint", 4, "ptr") ; GW_OWNER
+        if HasDialogOrPopupSemantics(
+            style, exStyle, className, ownerHwnd)
             return false
         if !(style & 0x40000) ; WS_THICKFRAME: filters most dialogs and fixed popups.
             return false
 
-        className := WinGetClass(title)
         if Config["excludedClasses"].Has(className)
             return false
 
