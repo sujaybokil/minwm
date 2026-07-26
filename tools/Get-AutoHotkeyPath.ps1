@@ -24,7 +24,6 @@ $installDirectories += @(
 
 foreach ($directory in ($installDirectories | Select-Object -Unique)) {
     foreach ($relativePath in @(
-        'AutoHotkey.exe',
         'v2\AutoHotkey64.exe',
         'AutoHotkey64.exe'
     )) {
@@ -33,6 +32,23 @@ foreach ($directory in ($installDirectories | Select-Object -Unique)) {
             (Resolve-Path -LiteralPath $candidate).Path
             return
         }
+    }
+
+    $versionDirectories = Get-ChildItem -LiteralPath $directory `
+        -Directory -Filter 'v2*' -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending
+    foreach ($versionDirectory in $versionDirectories) {
+        $candidate = Join-Path $versionDirectory.FullName 'AutoHotkey64.exe'
+        if (Test-Path -LiteralPath $candidate) {
+            (Resolve-Path -LiteralPath $candidate).Path
+            return
+        }
+    }
+
+    $launcher = Join-Path $directory 'AutoHotkey.exe'
+    if (Test-Path -LiteralPath $launcher) {
+        (Resolve-Path -LiteralPath $launcher).Path
+        return
     }
 }
 
