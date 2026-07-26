@@ -115,7 +115,8 @@ SelectTileableMinimumSizeIndices(layout, minimums, usableWidth, usableHeight, ga
         tiledMinimums := []
         for _, index in tiledIndices
             tiledMinimums.Push(minimums[index])
-        if CanTileMinimumSizes(layout, tiledMinimums, usableWidth, usableHeight, gap)
+        if CanTileMinimumSizes(
+            layout, tiledMinimums, usableWidth, usableHeight, gap)
             break
 
         largestLocalIndex := FindLargestMinimumSizeIndex(tiledMinimums)

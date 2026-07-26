@@ -6,6 +6,7 @@
 #Include "lib\debug.ahk"
 #Include "lib\geometry.ahk"
 #Include "lib\windows.ahk"
+#Include "lib\focus-border.ahk"
 #Include "lib\constraints.ahk"
 #Include "lib\selection.ahk"
 #Include "lib\layouts.ahk"
@@ -30,11 +31,17 @@ for message in StartupMessages
 try {
     RegisterHotkeys()
     InitializeTray()
-    OnExit((*) => DebugLog("minwm exiting"))
+    StartFocusBorder()
+    OnExit(HandleManagerExit)
     SetTimer(RefreshLayout, Config["pollInterval"])
     RefreshLayout()
 } catch Error as err {
     HandleStartupFailure(err)
+}
+
+HandleManagerExit(*) {
+    StopFocusBorder()
+    DebugLog("minwm exiting")
 }
 
 HandleStartupFailure(err) {
@@ -213,7 +220,7 @@ RefreshLayoutPhysical() {
     selection := SelectTileableWindows(Manager.layout, Manager.order, area, Manager.gap)
     Manager.order := selection.tiled
     Manager.constraintFloats := selection.floating
-    LogConstraintSelection(selection.floatingDetails)
+    LogConstraintSelection(selection)
     LogRefreshStatus("monitor=" area.index
         "; eligible=" windows.Length
         "; tiled=" Manager.order.Length
@@ -221,13 +228,15 @@ RefreshLayoutPhysical() {
         "; top-level=" WinGetList().Length)
     LogLayoutChange(area)
     ApplyLayout(Manager.layout, Manager.order, area, Manager.gap, Manager.masterRatio)
+    CenterConstraintFloatingWindows(
+        Manager.constraintFloats, area, Manager.gap)
 }
 
-LogConstraintSelection(details) {
+LogConstraintSelection(selection) {
     global Manager
-    status := ConstraintSelectionDescription(details)
+    status := ConstraintSelectionDescription(selection.floatingDetails)
     if (status != Manager.lastConstraintStatus) {
-        DebugLog("Constraint-floating windows: " status)
+        DebugLog("Constraint decision: " status)
         Manager.lastConstraintStatus := status
     }
 }

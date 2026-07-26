@@ -14,6 +14,21 @@ ApplyLayout(layout, windows, area, gap, masterRatio) {
         ApplyHorizontalMasterStack(windows, area, gap, masterRatio)
 }
 
+CenterConstraintFloatingWindows(windows, area, gap) {
+    for hwnd in windows {
+        try {
+            current := GetVisibleWindowRect(hwnd)
+            minimum := GetVisibleMinimumSize(hwnd)
+            target := CalculateCenteredFloatingRect(area, current, minimum, gap)
+            MoveWindowToRect(hwnd, target.left, target.top,
+                RectWidth(target), RectHeight(target))
+        } catch Error as err {
+            DebugLog("Could not center constraint-floating hwnd=" hwnd ": "
+                ErrorDescription(err))
+        }
+    }
+}
+
 ApplyVerticalMasterStack(windows, area, gap, masterRatio) {
     ; Reserve one gap at each outer edge, then one gap for every internal gutter.
     ; This makes the screen edge and every window-to-window gap exactly equal.

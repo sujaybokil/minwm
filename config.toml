@@ -22,6 +22,10 @@ debugLogPath = "minwm-debug.log"
 # Rotate the log to minwm-debug.log.1 after it reaches this size.
 debugMaxSizeMb = 5
 
+# Focused-window border. Set width to 0 to disable it.
+focusBorderWidth = 1
+focusBorderColor = "FFFFFF"
+
 # Classes that must never be tiled. Use one line; only quoted strings are supported.
 excludedClasses = ["Progman", "WorkerW", "Shell_TrayWnd", "#32770"]
 

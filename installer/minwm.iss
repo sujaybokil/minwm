@@ -142,6 +142,31 @@ begin
       mbError, MB_OK);
 end;
 
+procedure EnsureFocusBorderConfig();
+var
+  ConfigPath: String;
+  Contents: AnsiString;
+  Addition: AnsiString;
+begin
+  ConfigPath := ExpandConstant('{app}\config.toml');
+  if not LoadStringFromFile(ConfigPath, Contents) then
+    exit;
+
+  Addition := '';
+  if Pos('focusBorderWidth', Contents) = 0 then
+    Addition := Addition + 'focusBorderWidth = 1' + #13#10;
+  if Pos('focusBorderColor', Contents) = 0 then
+    Addition := Addition + 'focusBorderColor = "FFFFFF"' + #13#10;
+  if Addition = '' then
+    exit;
+
+  Log('Adding new focus-border defaults to the preserved config.toml.');
+  SaveStringToFile(ConfigPath,
+    Chr(13) + Chr(10) +
+    '# Focused-window border. Set width to 0 to disable it.' + #13#10 +
+    Addition, True);
+end;
+
 function CreateMinwmLogonTask(): Boolean;
 var
   ResultCode: Integer;
@@ -223,6 +248,7 @@ begin
   end
   else if CurStep = ssPostInstall then
   begin
+    EnsureFocusBorderConfig();
     DeleteFile(ExpandConstant('{userstartup}\minwm.lnk'));
     if WizardIsTaskSelected('startatlogon') then
     begin

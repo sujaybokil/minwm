@@ -19,6 +19,8 @@ BuildDefaultConfig() {
         "debugEnabled", false,
         "debugLogPath", A_ScriptDir "\minwm-debug.log",
         "debugMaxSizeMb", 5,
+        "focusBorderWidth", 1,
+        "focusBorderColor", "FFFFFF",
         "excludedClasses", Map("Progman", true, "WorkerW", true, "Shell_TrayWnd", true, "#32770", true),
         "hotkeys", Map(
             "cycleLayout", "#t",
@@ -75,7 +77,12 @@ LoadConfigFile(path) {
         value := ParseTomlValue(Trim(pair[2]), lineNumber)
         if (!IsObject(value) && value = "__MINWM_INVALID__")
             continue
-        target := (section = "hotkeys") ? Config["hotkeys"] : Config
+        ; Upgrade migrations may append a newly introduced global setting
+        ; after the existing [hotkeys] table. Route known hotkeys to that
+        ; table and recognized global keys back to the root configuration.
+        target := (section = "hotkeys" && Config["hotkeys"].Has(key))
+            ? Config["hotkeys"]
+            : Config
         if !target.Has(key) {
             ConfigLoadMessages.Push("line " lineNumber ": unknown setting " key)
             continue

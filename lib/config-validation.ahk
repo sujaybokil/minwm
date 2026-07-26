@@ -11,6 +11,7 @@ ValidateConfig() {
     ValidateIntegerSetting("gapStep", 1, 1000, defaults)
     ValidateIntegerSetting("minGap", 0, 1000, defaults)
     ValidateIntegerSetting("debugMaxSizeMb", 1, 100, defaults)
+    ValidateIntegerSetting("focusBorderWidth", 0, 10, defaults)
 
     ValidateNumberSetting("masterRatio", 0.05, 0.95, defaults)
     ValidateNumberSetting("masterRatioStep", 0.01, 0.50, defaults)
@@ -36,12 +37,31 @@ ValidateConfig() {
         Config["debugLogPath"] := defaults["debugLogPath"]
     }
 
+    ValidateColorSetting("focusBorderColor", defaults)
+
     if !IsObject(Config["excludedClasses"]) {
         ConfigLoadMessages.Push("excludedClasses must be an array of strings; using the default")
         Config["excludedClasses"] := defaults["excludedClasses"]
     }
 
     ValidateHotkeySettings(defaults["hotkeys"])
+}
+
+ValidateColorSetting(name, defaults) {
+    global Config, ConfigLoadMessages
+    value := Config[name]
+    if (Type(value) = "String") {
+        value := Trim(value)
+        if (SubStr(value, 1, 1) = "#")
+            value := SubStr(value, 2)
+        if RegExMatch(value, "i)^[0-9a-f]{6}$") {
+            Config[name] := StrUpper(value)
+            return
+        }
+    }
+    ConfigLoadMessages.Push(name " must be a six-digit RGB hex color; using "
+        defaults[name])
+    Config[name] := defaults[name]
 }
 
 ValidateIntegerSetting(name, minimum, maximum, defaults) {

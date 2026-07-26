@@ -39,3 +39,37 @@ CalculateRawRectForVisibleTarget(raw, visible, target) {
         bottom: target.bottom + margins.bottom
     }
 }
+
+CalculateCenteredFloatingRect(area, current, minimum, gap) {
+    availableWidth := Max(1, RectWidth(area) - 2 * gap)
+    availableHeight := Max(1, RectHeight(area) - 2 * gap)
+    width := (minimum.width > 0)
+        ? minimum.width
+        : Min(RectWidth(current), availableWidth)
+    height := (minimum.height > 0)
+        ? minimum.height
+        : Min(RectHeight(current), availableHeight)
+    x := area.left + Floor((RectWidth(area) - width) / 2)
+    y := area.top + Floor((RectHeight(area) - height) / 2)
+    return RectFromXYWH(x, y, width, height)
+}
+
+CalculateFocusBorderRects(rect, thickness) {
+    thickness := Min(
+        thickness,
+        Floor(RectWidth(rect) / 2),
+        Floor(RectHeight(rect) / 2))
+    if (thickness <= 0)
+        return []
+    middleHeight := RectHeight(rect) - 2 * thickness
+    return [
+        RectFromXYWH(rect.left, rect.top, RectWidth(rect), thickness),
+        RectFromXYWH(
+            rect.left, rect.bottom - thickness, RectWidth(rect), thickness),
+        RectFromXYWH(
+            rect.left, rect.top + thickness, thickness, middleHeight),
+        RectFromXYWH(
+            rect.right - thickness, rect.top + thickness,
+            thickness, middleHeight)
+    ]
+}

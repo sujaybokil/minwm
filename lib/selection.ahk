@@ -25,9 +25,9 @@ SelectTileableWindows(layout, windows, area, gap) {
 }
 
 ConstraintSelectionDescription(details) {
+    description := "floating="
     if !details.Length
-        return "none"
-    description := ""
+        description .= "none"
     for index, detail in details {
         minimum := detail.minimum
         description .= (index > 1 ? "," : "")

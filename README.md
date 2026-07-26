@@ -21,11 +21,9 @@ in AutoHotkey v2.
 - DWM visible-frame positioning for Electron and other custom-framed windows
 - Physical-pixel geometry across mixed-DPI monitors
 - Stable keyboard reordering and master promotion
+- Configurable 1px white focused-window border (`0` disables it)
 - Lightweight tray controls and optional startup-at-logon setup
 - Opt-in, size-limited diagnostic logging
-
-The project deliberately does not draw focus borders or other window
-decorations.
 
 ## Requirements
 
@@ -109,6 +107,8 @@ strings, and the `[hotkeys]` table.
 | `maxMasterRatio` | `0.75` | Highest permitted master share |
 | `debugLogPath` | `minwm-debug.log` | Diagnostic log path |
 | `debugMaxSizeMb` | `5` | Rotate the diagnostic log at this size |
+| `focusBorderWidth` | `1` | Focus border thickness; `0` disables it |
+| `focusBorderColor` | `FFFFFF` | Focus border color as six-digit RGB hex |
 | `excludedClasses` | Windows shell/dialog classes | Window classes never tiled |
 
 Invalid values fall back to safe defaults. Those corrections are written to the
@@ -122,11 +122,14 @@ minimum tracking size. It then:
 1. reserves the configured outer and inner gaps;
 2. checks the master and stack dimensions against every native minimum;
 3. redistributes spare space to constrained windows;
-4. if the set is impossible, floats the window with the largest minimum area;
-5. repeats until all remaining windows fit.
+4. keeps the master and stack categories fixed while resizing within them;
+5. if the arrangement cannot fit, floats the window with the largest minimum
+   area;
+6. repeats until all remaining windows fit.
 
 Floating-by-constraint is not permanent. Windows are reconsidered whenever the
-eligible window set changes.
+eligible window set changes. While excluded from tiling, they are resized as
+to their native minimum and centered in the active monitor's work area.
 
 Tile targets use DWM extended frame bounds, not the larger invisible resize
 border reported by many custom-framed applications. After a move, minwm

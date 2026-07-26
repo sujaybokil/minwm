@@ -41,6 +41,44 @@ RunGeometryTests() {
         target,
         "frameless window")
 
+    AssertRect(
+        CalculateCenteredFloatingRect(
+            RectFromXYWH(0, 0, 2560, 1528),
+            RectFromXYWH(100, 100, 1600, 1000),
+            { width: 1200, height: 900 },
+            12),
+        RectFromXYWH(680, 314, 1200, 900),
+        "constraint-floating window should use its minimum size and center")
+
+    AssertRect(
+        CalculateCenteredFloatingRect(
+            RectFromXYWH(0, 0, 1000, 800),
+            RectFromXYWH(0, 0, 1400, 1200),
+            { width: 0, height: 0 },
+            20),
+        RectFromXYWH(20, 20, 960, 760),
+        "window without native minimums should clamp to the available area")
+
+    borderRects := CalculateFocusBorderRects(
+        RectFromXYWH(10, 20, 100, 80), 2)
+    if (borderRects.Length != 4)
+        throw Error("focus border should contain four edge rectangles")
+    AssertRect(
+        borderRects[1], RectFromXYWH(10, 20, 100, 2),
+        "focus border top edge")
+    AssertRect(
+        borderRects[2], RectFromXYWH(10, 98, 100, 2),
+        "focus border bottom edge")
+    AssertRect(
+        borderRects[3], RectFromXYWH(10, 22, 2, 76),
+        "focus border left edge")
+    AssertRect(
+        borderRects[4], RectFromXYWH(108, 22, 2, 76),
+        "focus border right edge")
+    if CalculateFocusBorderRects(
+        RectFromXYWH(0, 0, 100, 100), 0).Length
+        throw Error("zero-width focus border should be disabled")
+
     if !RectsMatch(
         { left: 9, top: 11, right: 109, bottom: 111 },
         { left: 10, top: 10, right: 110, bottom: 110 })
@@ -120,6 +158,17 @@ RunGeometryTests() {
         throw Error("an oversized master should float before re-tiling")
     if (selection.tiled.Length != 2)
         throw Error("remaining windows should tile after an oversized master floats")
+
+    selection := SelectTileableMinimumSizeIndices("vertical", [
+        { width: 714, height: 124 },
+        { width: 1200, height: 750 },
+        { width: 700, height: 300 },
+        { width: 1200, height: 900 }
+    ], 2512, 1480, 24)
+    if (selection.floating.Length != 1 || selection.floating[1] != 4)
+        throw Error("an impossible stack should float its largest blocker")
+    if (selection.tiled[1] != 1)
+        throw Error("constraint solving must not change the master category")
 
     selection := SelectTileableMinimumSizeIndices("horizontal", [
         { width: 1900, height: 900 },
