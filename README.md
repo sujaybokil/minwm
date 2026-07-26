@@ -87,7 +87,7 @@ always excluded.
 | `Win+Shift+[` / `Win+Shift+]` | Decrease / increase the master area |
 | `Win+J` / `Win+K` | Focus next / previous tiled window |
 | `Win+Shift+J` / `Win+Shift+K` | Move the focused window in tiling order |
-| `Win+Enter` | Promote the focused window to master |
+| `Win+M` | Promote the focused window to master |
 | `Win+W` | Close the focused window |
 | `Win+I` | Show the configured hotkey reference |
 

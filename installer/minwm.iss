@@ -167,6 +167,30 @@ begin
     Addition, True);
 end;
 
+procedure MigrateDefaultHotkeys();
+var
+  ConfigPath: String;
+  Contents: AnsiString;
+  MatchPosition: Integer;
+  OldBinding: AnsiString;
+  NewBinding: AnsiString;
+begin
+  ConfigPath := ExpandConstant('{app}\config.toml');
+  if not LoadStringFromFile(ConfigPath, Contents) then
+    exit;
+
+  OldBinding := 'swapMaster = "#Enter"';
+  NewBinding := 'swapMaster = "#m"';
+  MatchPosition := Pos(OldBinding, Contents);
+  if MatchPosition = 0 then
+    exit;
+
+  Delete(Contents, MatchPosition, Length(OldBinding));
+  Insert(NewBinding, Contents, MatchPosition);
+  Log('Migrating the unchanged promote-to-master hotkey from Win+Enter to Win+M.');
+  SaveStringToFile(ConfigPath, Contents, False);
+end;
+
 function CreateMinwmLogonTask(): Boolean;
 var
   ResultCode: Integer;
@@ -249,6 +273,7 @@ begin
   else if CurStep = ssPostInstall then
   begin
     EnsureFocusBorderConfig();
+    MigrateDefaultHotkeys();
     DeleteFile(ExpandConstant('{userstartup}\minwm.lnk'));
     if WizardIsTaskSelected('startatlogon') then
     begin

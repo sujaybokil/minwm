@@ -20,6 +20,7 @@ All notable changes to minwm will be documented here. The project follows
 ### Changed
 
 - Installer upgrades now preserve the user's existing `config.toml`.
+- The default promote-to-master binding is now `Win+M`.
 - Constraint-floated windows are centered without changing which windows are
   in the master and stack categories.
 

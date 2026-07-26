@@ -33,7 +33,7 @@ BuildDefaultConfig() {
             "focusPrevious", "#k",
             "moveNext", "#+j",
             "movePrevious", "#+k",
-            "swapMaster", "#Enter",
+            "swapMaster", "#m",
             "closeWindow", "#w"
             , "showHotkeys", "#i"
         )
