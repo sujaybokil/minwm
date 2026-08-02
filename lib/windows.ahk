@@ -12,7 +12,10 @@ WithPerMonitorDpiAwareness(callback) {
     finally DllCall("User32\SetThreadDpiAwarenessContext", "ptr", oldContext, "ptr")
 }
 
-global WindowMinimumSizeCache := Map()
+InitializeWindowsState() {
+    global WindowMinimumSizeCache
+    WindowMinimumSizeCache := Map()
+}
 
 GetRawWindowRect(hwnd) {
     rectBuffer := Buffer(16, 0)
@@ -144,7 +147,8 @@ GetPrimaryMonitorArea() {
 GetEligibleWindows(area) {
     windows := []
     for hwnd in WinGetList() {
-        if IsEligibleWindow(hwnd) && IsWindowOnArea(hwnd, area)
+        if (IsEligibleWindow(hwnd) && IsWindowOnCurrentVirtualDesktop(hwnd)
+            && IsWindowOnArea(hwnd, area))
             windows.Push(hwnd)
     }
     PruneWindowMinimumSizeCache(windows)
@@ -166,6 +170,8 @@ IsEligibleWindow(hwnd) {
         if !(style & 0x10000000) ; WS_VISIBLE
             return false
         className := WinGetClass(title)
+        if IsWindowsStartMenuOrSearch(WinGetProcessName(title))
+            return false
         ownerHwnd := DllCall(
             "User32\GetWindow", "ptr", hwnd, "uint", 4, "ptr") ; GW_OWNER
         if HasDialogOrPopupSemantics(
@@ -199,4 +205,10 @@ FindWindowIndex(windows, hwnd) {
             return index
     }
     return 0
+}
+
+WrapWindowIndex(index, count) {
+    if (count <= 0)
+        return 0
+    return Mod(Mod(index - 1, count) + count, count) + 1
 }

@@ -1,4 +1,6 @@
 SelectTileableWindows(layout, windows, area, gap) {
+    if (layout = "maximized")
+        return { tiled: windows, floating: [], floatingDetails: [] }
     usableWidth := area.right - area.left - 2 * gap
     usableHeight := area.bottom - area.top - 2 * gap
     minimums := []

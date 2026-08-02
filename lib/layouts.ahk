@@ -2,6 +2,11 @@ ApplyLayout(layout, windows, area, gap, masterRatio) {
     if (layout = "floating" || windows.Length = 0)
         return
 
+    if (layout = "maximized") {
+        MaximizeWindows(windows)
+        return
+    }
+
     if (windows.Length = 1) {
         MoveWindowToRect(windows[1], area.left + gap, area.top + gap,
             area.right - area.left - 2 * gap, area.bottom - area.top - 2 * gap)
@@ -12,6 +17,21 @@ ApplyLayout(layout, windows, area, gap, masterRatio) {
         ApplyVerticalMasterStack(windows, area, gap, masterRatio)
     else if (layout = "horizontal")
         ApplyHorizontalMasterStack(windows, area, gap, masterRatio)
+}
+
+MaximizeWindows(windows) {
+    for hwnd in windows {
+        try {
+            title := "ahk_id " hwnd
+            if (WinGetMinMax(title) != 1) {
+                WinMaximize(title)
+                DebugLog("Maximized tiled hwnd=" hwnd)
+            }
+        } catch Error as err {
+            DebugLog("Could not maximize tiled hwnd=" hwnd ": "
+                ErrorDescription(err))
+        }
+    }
 }
 
 CenterConstraintFloatingWindows(windows, area, gap) {

@@ -26,6 +26,7 @@ if ([version]$actualVersion -lt [version]$requiredVersion -or
 function Invoke-AutoHotkey([string[]]$Arguments, [string]$FailureMessage) {
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $AutoHotkeyPath
+    $startInfo.WorkingDirectory = Split-Path -Parent $Arguments[-1]
     $startInfo.UseShellExecute = $false
     foreach ($argument in $Arguments) {
         [void]$startInfo.ArgumentList.Add($argument)
@@ -40,16 +41,41 @@ function Invoke-AutoHotkey([string[]]$Arguments, [string]$FailureMessage) {
     }
 }
 
-Invoke-AutoHotkey `
-    @('/force', '/ErrorStdOut', '/Validate', (Join-Path $projectRoot 'minwm.ahk')) `
-    'AutoHotkey syntax validation failed'
+function Assert-VirtualDesktopInstallerOption {
+    $installerPath = Join-Path $projectRoot 'installer\minwm.iss'
+    $installer = Get-Content -Raw -LiteralPath $installerPath
+    $taskLine = 'Name: "virtualdesktophelper"; Description: "Install direct virtual-desktop switching (recommended: no intermediate animations)"; GroupDescription: "Virtual desktops:"; Flags: checkablealone'
+    if (!$installer.Contains($taskLine)) {
+        throw 'Installer must expose the default-on virtual-desktop helper task with its rationale.'
+    }
+    if ($installer -match 'Name: "virtualdesktophelper"[^\r\n]*Flags: [^\r\n]*\bunchecked\b') {
+        throw 'Virtual-desktop helper task must default to selected.'
+    }
+    foreach ($file in @('VirtualDesktop11.exe', 'VirtualDesktop11-24H2.exe')) {
+        if (!$installer.Contains("dependencies\virtualdesktop\$file") -or
+            !$installer.Contains('Tasks: virtualdesktophelper')) {
+            throw "Installer must conditionally package the VirtualDesktop dependency: $file"
+        }
+    }
+    if (!$installer.Contains('licenses\LICENSE-VirtualDesktop.txt') -or
+        !$installer.Contains('Tasks: virtualdesktophelper')) {
+        throw 'Installer must conditionally package the VirtualDesktop license.'
+    }
+    if (!$installer.Contains("if not WizardIsTaskSelected('virtualdesktophelper') then") -or
+        !$installer.Contains('DeleteFile(ExpandConstant(''{app}\bin\VirtualDesktop11.exe''));') -or
+        !$installer.Contains('DeleteFile(ExpandConstant(''{app}\bin\VirtualDesktop11-24H2.exe''));')) {
+        throw 'Installer must remove an existing helper when an upgrade deselects it.'
+    }
+}
+
+Assert-VirtualDesktopInstallerOption
 
 Invoke-AutoHotkey `
-    @('/force', '/ErrorStdOut', (Join-Path $projectRoot 'minwm.ahk'), '--check') `
+    @('/ErrorStdOut', (Join-Path $projectRoot 'minwm-check.ahk')) `
     'Module and configuration smoke test failed'
 
 Invoke-AutoHotkey `
-    @('/force', '/ErrorStdOut', (Join-Path $projectRoot 'tests\geometry-tests.ahk')) `
+    @('/force', '/ErrorStdOut', (Join-Path $projectRoot 'minwm-tests.ahk')) `
     'Unit tests failed'
 
 Write-Host "Validation and unit tests passed with AutoHotkey $actualVersion."

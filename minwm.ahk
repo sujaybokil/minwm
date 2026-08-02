@@ -1,47 +1,73 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
+SetTimer(InitializeMinwm, -1)
+
 #Include "config.ahk"
 #Include "lib\config-validation.ahk"
 #Include "lib\debug.ahk"
 #Include "lib\geometry.ahk"
 #Include "lib\window-rules.ahk"
 #Include "lib\windows.ahk"
+#Include "lib\workspace-state.ahk"
+#Include "lib\virtual-desktops.ahk"
 #Include "lib\focus-border.ahk"
+#Include "lib\desktop-indicator.ahk"
+#Include "lib\layout-notification.ahk"
 #Include "lib\constraints.ahk"
 #Include "lib\selection.ahk"
 #Include "lib\layouts.ahk"
+#Include "lib\custom-hotkeys.ahk"
 
-; Loads all modules without starting the manager; useful for a syntax smoke test.
-if (A_Args.Length && A_Args[1] = "--check")
-    ExitApp
+InitializeMinwm() {
+    global Manager, StartupMessages, HotkeyHelpGui
+    InitializeConfig()
+    ValidateConfig()
+    InitializeWindowsState()
+    InitializeWorkspaceStateStore()
+    InitializeVirtualDesktopState()
+    InitializeFocusBorderState()
+    InitializeDesktopIndicatorState()
+    InitializeLayoutNotificationState()
+    Manager := CreateWorkspaceManagerState()
+    StartupMessages := []
+    HotkeyHelpGui := ""
 
-; Controller state is intentionally workspace-agnostic. A future virtual-desktop
-; provider only needs to filter GetEligibleWindows before SyncWindowOrder.
-global Manager := { layout: "vertical", gap: Config["defaultGap"], masterRatio: Config["masterRatio"], order: [], constraintFloats: [], lastConstraintStatus: "", lastLayoutState: "", lastRefreshStatus: "" }
-global StartupMessages := []
-global HotkeyHelpGui := ""
-
-ApplyCommandLineOptions()
-InitializeDebugLog()
-DebugLog("minwm starting; debug=" Config["debugEnabled"] ", poll=" Config["pollInterval"] "ms")
-for message in ConfigLoadMessages
-    DebugLog("Config: " message)
-for message in StartupMessages
-    DebugLog("Startup: " message)
-try {
-    RegisterHotkeys()
-    InitializeTray()
-    StartFocusBorder()
-    OnExit(HandleManagerExit)
-    SetTimer(RefreshLayout, Config["pollInterval"])
-    RefreshLayout()
-} catch Error as err {
-    HandleStartupFailure(err)
+    ApplyCommandLineOptions()
+    InitializeDebugLog()
+    DebugLog("minwm starting; debug=" Config["debugEnabled"]
+        ", poll=" Config["pollInterval"] "ms")
+    for message in ConfigLoadMessages
+        DebugLog("Config: " message)
+    for message in StartupMessages
+        DebugLog("Startup: " message)
+    try {
+        workspaceReady := Config["virtualDesktopsEnabled"]
+            ? StartVirtualDesktopService() : false
+        if !workspaceReady && !Config["virtualDesktopsEnabled"]
+            DebugLog("Virtual desktops disabled by configuration")
+        if workspaceReady
+            ActivateWorkspace(VirtualDesktops.currentId)
+        RegisterHotkeys()
+        InitializeTray()
+        OnExit(HandleManagerExit)
+        StartFocusBorder()
+        if workspaceReady
+            StartDesktopIndicator()
+        StartCustomHotkeys(GetReservedHotkeys())
+        SetTimer(RefreshLayout, Config["pollInterval"])
+        RefreshLayout()
+    } catch Error as err {
+        HandleStartupFailure(err)
+    }
 }
 
 HandleManagerExit(*) {
+    StopCustomHotkeys()
+    StopLayoutNotification()
+    StopDesktopIndicator()
     StopFocusBorder()
+    StopVirtualDesktopService()
     DebugLog("minwm exiting")
 }
 
@@ -50,7 +76,7 @@ HandleStartupFailure(err) {
     DebugLog(message)
     try FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") " | " message "`n",
         A_ScriptDir "\minwm-startup-error.log", "UTF-8")
-    try MsgBox(message "`n`nCheck config.toml and minwm-startup-error.log.",
+    try MsgBox(message "`n`nCheck config\config.toml and minwm-startup-error.log.",
         "minwm startup error", 0x10)
     ExitApp(1)
 }
@@ -71,41 +97,82 @@ RegisterHotkeys() {
     Hotkey(keys["swapMaster"], (*) => SwapFocusedWithMaster())
     Hotkey(keys["closeWindow"], (*) => CloseFocusedWindow())
     Hotkey(keys["showHotkeys"], (*) => ShowHotkeyHelp())
+    if VirtualDesktops.enabled {
+        Loop 6
+            RegisterWorkspaceHotkey(A_Index)
+    }
     DebugLog("Hotkeys registered")
 }
 
+RegisterWorkspaceHotkey(workspaceNumber) {
+    Hotkey("#" workspaceNumber, (*) => SwitchToVirtualWorkspace(workspaceNumber))
+}
+
+GetReservedHotkeys() {
+    global Config, VirtualDesktops
+    reserved := []
+    for _, binding in Config["hotkeys"]
+        reserved.Push(binding)
+    if VirtualDesktops.enabled {
+        Loop 6
+            reserved.Push("#" A_Index)
+    }
+    return reserved
+}
+
 InitializeTray() {
-    global Manager
+    global ConfigDirectory, Manager
     try TraySetIcon(A_ScriptDir "\assets\minwm.ico")
     A_IconHidden := false
     A_IconTip := "minwm — " Manager.layout " layout"
     A_TrayMenu.Delete()
     A_TrayMenu.Add("Re-tile active monitor", (*) => RefreshLayout())
     A_TrayMenu.Add("Cycle layout", (*) => CycleLayout())
-    A_TrayMenu.Add("Open config.toml", (*) => Run("notepad.exe " Chr(34) A_ScriptDir "\config.toml" Chr(34)))
+    A_TrayMenu.Add("Show hotkeys", (*) => ShowHotkeyHelp())
+    A_TrayMenu.Add("Open config.toml", (*) => Run("notepad.exe " Chr(34) ConfigDirectory "\config.toml" Chr(34)))
     A_TrayMenu.Add()
     A_TrayMenu.Add("Exit minwm", (*) => ExitApp())
+    UpdateTrayTip()
     DebugLog("System tray initialized")
 }
 
 UpdateTrayTip() {
-    global Manager
-    A_IconTip := "minwm — " Manager.layout " layout"
+    global Manager, VirtualDesktops
+    desktop := ""
+    if VirtualDesktops.enabled {
+        index := FindVirtualDesktopIndex(
+            VirtualDesktops.desktopIds, VirtualDesktops.currentId)
+        if index
+            desktop := " — D" index
+    }
+    A_IconTip := "minwm" desktop " — " Manager.layout " layout"
 }
 
 ShowHotkeyHelp() {
-    global HotkeyHelpGui
+    global Config, HotkeyHelpGui
     CloseHotkeyHelp()
 
     helpGui := Gui("+AlwaysOnTop +ToolWindow", "minwm hotkeys")
     helpGui.SetFont("s10", "Segoe UI")
     helpGui.MarginX := 18
     helpGui.MarginY := 16
-    helpGui.AddText("w430", "minwm keybindings")
+    helpGui.AddText("w560", "minwm keybindings")
     helpGui.SetFont("s9", "Segoe UI")
-    helpGui.AddText("w430", "These values are read from config.toml. Restart minwm after editing it.")
-    helpGui.AddText("w430", "")
-    helpGui.AddText("w430", BuildHotkeyHelpText())
+    helpGui.AddText(
+        "w560", "These values are read from config\config.toml. Restart minwm after editing it.")
+    hotkeyList := helpGui.AddListView("w560 r18", ["Hotkey", "Behavior"])
+    if VirtualDesktops.enabled {
+        Loop 6
+            hotkeyList.Add("", "Win + " A_Index,
+                "Switch to virtual desktop D" A_Index)
+    }
+    labels := GetHotkeyHelpLabels()
+    for action, binding in Config["hotkeys"] {
+        if labels.Has(action)
+            hotkeyList.Add("", HumanizeHotkey(binding), labels[action])
+    }
+    hotkeyList.ModifyCol(1, 130)
+    hotkeyList.ModifyCol(2, 405)
     closeButton := helpGui.AddButton("w100 Default", "Close")
     closeButton.OnEvent("Click", CloseHotkeyHelp)
     helpGui.OnEvent("Close", CloseHotkeyHelp)
@@ -122,10 +189,9 @@ CloseHotkeyHelp(*) {
     }
 }
 
-BuildHotkeyHelpText() {
-    global Config
-    labels := Map(
-        "cycleLayout", "Cycle vertical, horizontal, and floating layouts",
+GetHotkeyHelpLabels() {
+    return Map(
+        "cycleLayout", "Cycle vertical, horizontal, maximized, and floating layouts",
         "retile", "Re-tile the active monitor",
         "increaseGap", "Increase gaps",
         "decreaseGap", "Decrease gaps",
@@ -139,12 +205,6 @@ BuildHotkeyHelpText() {
         "closeWindow", "Close focused window",
         "showHotkeys", "Show this hotkey reference"
     )
-    text := ""
-    for action, binding in Config["hotkeys"] {
-        if labels.Has(action)
-            text .= HumanizeHotkey(binding) "`t" labels[action] "`n"
-    }
-    return RTrim(text, "`n")
 }
 
 HumanizeHotkey(binding) {
@@ -285,15 +345,22 @@ SyncWindowOrder(currentWindows) {
 CycleLayout() {
     global Manager
     previous := Manager.layout
-    Manager.layout := (Manager.layout = "vertical") ? "horizontal" : (Manager.layout = "horizontal") ? "floating" : "vertical"
+    Manager.layout := (Manager.layout = "vertical") ? "horizontal"
+        : (Manager.layout = "horizontal") ? "maximized"
+        : (Manager.layout = "maximized") ? "floating" : "vertical"
     Manager.lastLayoutState := ""
     DebugLog("Layout changed: " previous " -> " Manager.layout)
     UpdateTrayTip()
+    if !IsTilingModeActive()
+        HideFocusBorder("floating-layout")
+    ShowLayoutNotification(Manager.layout)
     RefreshLayout()
 }
 
 ChangeGap(delta) {
     global Config, Manager
+    if !IsTilingModeActive()
+        return
     Manager.gap := Max(Config["minGap"], Manager.gap + delta)
     DebugLog("Gap changed to " Manager.gap)
     RefreshLayout()
@@ -301,6 +368,8 @@ ChangeGap(delta) {
 
 ChangeMasterRatio(delta) {
     global Config, Manager
+    if !IsTilingModeActive()
+        return
     Manager.masterRatio := Min(Config["maxMasterRatio"], Max(Config["minMasterRatio"], Manager.masterRatio + delta))
     DebugLog("Master ratio changed to " Manager.masterRatio)
     RefreshLayout()
@@ -308,20 +377,24 @@ ChangeMasterRatio(delta) {
 
 FocusRelative(delta) {
     global Manager
+    if !IsTilingModeActive()
+        return
     index := FindWindowIndex(Manager.order, WinExist("A"))
     if !index || Manager.order.Length < 2
         return
-    next := Mod(index - 1 + delta, Manager.order.Length) + 1
+    next := WrapWindowIndex(index + delta, Manager.order.Length)
     DebugLog("Focus moved: hwnd=" Manager.order[index] " -> hwnd=" Manager.order[next])
     WinActivate("ahk_id " Manager.order[next])
 }
 
 MoveRelative(delta) {
     global Manager
+    if !IsTilingModeActive()
+        return
     index := FindWindowIndex(Manager.order, WinExist("A"))
     if !index || Manager.order.Length < 2
         return
-    other := Mod(index - 1 + delta, Manager.order.Length) + 1
+    other := WrapWindowIndex(index + delta, Manager.order.Length)
     temp := Manager.order[index]
     Manager.order[index] := Manager.order[other]
     Manager.order[other] := temp
@@ -331,6 +404,8 @@ MoveRelative(delta) {
 
 SwapFocusedWithMaster() {
     global Manager
+    if !IsTilingModeActive()
+        return
     index := FindWindowIndex(Manager.order, WinExist("A"))
     if !index || index = 1
         return

@@ -33,8 +33,11 @@ UninstallDisplayIcon={app}\assets\minwm.ico
 [Files]
 Source: "..\minwm.ahk"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\config.ahk"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\config.toml"; DestDir: "{app}"; Flags: onlyifdoesntexist
+Source: "..\config\config.toml"; DestDir: "{app}\config"; Flags: onlyifdoesntexist
 Source: "..\lib\*.ahk"; DestDir: "{app}\lib"; Flags: ignoreversion
+Source: "..\dependencies\virtualdesktop\VirtualDesktop11.exe"; DestDir: "{app}\bin"; Flags: ignoreversion; Tasks: virtualdesktophelper
+Source: "..\dependencies\virtualdesktop\VirtualDesktop11-24H2.exe"; DestDir: "{app}\bin"; Flags: ignoreversion; Tasks: virtualdesktophelper
+Source: "..\licenses\LICENSE-VirtualDesktop.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion; Tasks: virtualdesktophelper
 Source: "..\assets\minwm.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -42,6 +45,7 @@ Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Tasks]
 Name: "startatlogon"; Description: "Start minwm automatically when I log on"; GroupDescription: "Startup:"
+Name: "virtualdesktophelper"; Description: "Install direct virtual-desktop switching (recommended: no intermediate animations)"; GroupDescription: "Virtual desktops:"; Flags: checkablealone
 
 [Icons]
 Name: "{autoprograms}\minwm"; Filename: "{code:GetAutoHotkeyPath}"; Parameters: """{app}\minwm.ahk"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\minwm.ico"
@@ -142,13 +146,35 @@ begin
       mbError, MB_OK);
 end;
 
-procedure EnsureFocusBorderConfig();
+procedure MigrateConfigurationDirectory();
+var
+  LegacyConfigPath: String;
+  ConfigDirectory: String;
+  ConfigPath: String;
+begin
+  LegacyConfigPath := ExpandConstant('{app}\config.toml');
+  ConfigDirectory := ExpandConstant('{app}\config');
+  ConfigPath := AddBackslash(ConfigDirectory) + 'config.toml';
+  if FileExists(ConfigPath) or not FileExists(LegacyConfigPath) then
+    exit;
+  if not ForceDirectories(ConfigDirectory) then
+  begin
+    Log('Could not create the minwm configuration directory for migration.');
+    exit;
+  end;
+  if RenameFile(LegacyConfigPath, ConfigPath) then
+    Log('Migrated config.toml into the configuration directory.')
+  else
+    Log('Could not migrate the existing config.toml into the configuration directory.');
+end;
+
+procedure EnsureOptionalConfig();
 var
   ConfigPath: String;
   Contents: AnsiString;
   Addition: AnsiString;
 begin
-  ConfigPath := ExpandConstant('{app}\config.toml');
+  ConfigPath := ExpandConstant('{app}\config\config.toml');
   if not LoadStringFromFile(ConfigPath, Contents) then
     exit;
 
@@ -157,13 +183,17 @@ begin
     Addition := Addition + 'focusBorderWidth = 1' + #13#10;
   if Pos('focusBorderColor', Contents) = 0 then
     Addition := Addition + 'focusBorderColor = "FFFFFF"' + #13#10;
+  if Pos('defaultLayout', Contents) = 0 then
+    Addition := Addition + 'defaultLayout = "vertical"' + #13#10;
+  if Pos('virtualDesktopsEnabled', Contents) = 0 then
+    Addition := Addition + 'virtualDesktopsEnabled = true' + #13#10;
   if Addition = '' then
     exit;
 
-  Log('Adding new focus-border defaults to the preserved config.toml.');
+  Log('Adding new optional settings to the preserved config.toml.');
   SaveStringToFile(ConfigPath,
     Chr(13) + Chr(10) +
-    '# Focused-window border. Set width to 0 to disable it.' + #13#10 +
+    '# Optional focus-border settings.' + #13#10 +
     Addition, True);
 end;
 
@@ -172,23 +202,38 @@ var
   ConfigPath: String;
   Contents: AnsiString;
   MatchPosition: Integer;
+  Changed: Boolean;
   OldBinding: AnsiString;
   NewBinding: AnsiString;
 begin
-  ConfigPath := ExpandConstant('{app}\config.toml');
+  ConfigPath := ExpandConstant('{app}\config\config.toml');
   if not LoadStringFromFile(ConfigPath, Contents) then
     exit;
+  Changed := False;
 
   OldBinding := 'swapMaster = "#Enter"';
   NewBinding := 'swapMaster = "#m"';
   MatchPosition := Pos(OldBinding, Contents);
-  if MatchPosition = 0 then
-    exit;
+  if MatchPosition <> 0 then
+  begin
+    Delete(Contents, MatchPosition, Length(OldBinding));
+    Insert(NewBinding, Contents, MatchPosition);
+    Log('Migrating the unchanged promote-to-master hotkey from Win+Enter to Win+M.');
+    Changed := True;
+  end;
 
-  Delete(Contents, MatchPosition, Length(OldBinding));
-  Insert(NewBinding, Contents, MatchPosition);
-  Log('Migrating the unchanged promote-to-master hotkey from Win+Enter to Win+M.');
-  SaveStringToFile(ConfigPath, Contents, False);
+  OldBinding := 'showHotkeys = "#i"';
+  NewBinding := 'showHotkeys = "#h"';
+  MatchPosition := Pos(OldBinding, Contents);
+  if MatchPosition <> 0 then
+  begin
+    Delete(Contents, MatchPosition, Length(OldBinding));
+    Insert(NewBinding, Contents, MatchPosition);
+    Log('Migrating the unchanged hotkey-reference binding from Win+I to Win+H.');
+    Changed := True;
+  end;
+  if Changed then
+    SaveStringToFile(ConfigPath, Contents, False);
 end;
 
 function CreateMinwmLogonTask(): Boolean;
@@ -265,14 +310,22 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
   begin
+    MigrateConfigurationDirectory();
     Log('Removing an existing minwm Startup-folder fallback before replacement.');
     DeleteFile(ExpandConstant('{userstartup}\minwm.lnk'));
+    if not WizardIsTaskSelected('virtualdesktophelper') then
+    begin
+      Log('Removing the optional VirtualDesktop helper because it was not selected.');
+      DeleteFile(ExpandConstant('{app}\bin\VirtualDesktop11.exe'));
+      DeleteFile(ExpandConstant('{app}\bin\VirtualDesktop11-24H2.exe'));
+      DeleteFile(ExpandConstant('{app}\licenses\LICENSE-VirtualDesktop.txt'));
+    end;
     if not WizardIsTaskSelected('startatlogon') then
       RemoveMinwmLogonTask();
   end
   else if CurStep = ssPostInstall then
   begin
-    EnsureFocusBorderConfig();
+    EnsureOptionalConfig();
     MigrateDefaultHotkeys();
     DeleteFile(ExpandConstant('{userstartup}\minwm.lnk'));
     if WizardIsTaskSelected('startatlogon') then

@@ -1,9 +1,12 @@
 /dist/
+/dependencies/
+/test-results/
 
 *.log
 *.bak
 *.ahk.bak
 *.tmp
+minwm-custom-hotkeys-wrapper.ahk
 
 .DS_Store
 Thumbs.db

@@ -1,3 +1,4 @@
+# Builds the minwm setup executable.
 param(
     [string]$AutoHotkeyPath = "",
     [string]$InnoCompilerPath = ""
@@ -7,6 +8,17 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$virtualDesktopDependencyPath = Join-Path $projectRoot 'dependencies\virtualdesktop'
+$virtualDesktopFiles = @{
+    'VirtualDesktop11.exe' = 'F6532DB79F6F0E4018CE77F08805D3FD3F7BB076CBFBAC0AC8189FE5376D9E82'
+    'VirtualDesktop11-24H2.exe' = '8334B529D19E71662950821C91ED996A0E92DF41C8D0A077E95151AA7041CB35'
+}
+& (Join-Path $PSScriptRoot 'Prepare-Dependencies.ps1')
+foreach ($file in $virtualDesktopFiles.GetEnumerator()) {
+    $path = Join-Path $virtualDesktopDependencyPath $file.Key
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash
+    if ($hash -ne $file.Value) { throw "VirtualDesktop dependency hash mismatch: $path" }
+}
 $version = (Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'VERSION')).Trim()
 $autoHotkeyVersion = (Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'AUTOHOTKEY_VERSION')).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+$') {

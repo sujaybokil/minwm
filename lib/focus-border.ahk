@@ -1,9 +1,16 @@
 ; Four click-through, non-activating tool windows form a thin border inside the
 ; focused window's visible DWM frame. They never participate in tiling.
-global FocusBorder := {
-    edges: [],
-    lastState: "",
-    enabled: false
+InitializeFocusBorderState() {
+    global FocusBorder
+    FocusBorder := {
+        edges: [],
+        lastState: "",
+        enabled: false,
+        locationEventHook: 0,
+        locationEventCallback: 0,
+        foregroundEventHook: 0,
+        foregroundEventCallback: 0
+    }
 }
 
 StartFocusBorder() {
@@ -23,7 +30,11 @@ StartFocusBorder() {
             FocusBorder.edges.Push(edge)
         }
         FocusBorder.enabled := true
-        SetTimer(UpdateFocusBorder, Config["pollInterval"])
+        StartFocusBorderLocationTracking()
+        ; Location-change events provide immediate updates while dragging.
+        ; This short polling fallback covers applications which do not emit
+        ; them consistently during live resize.
+        SetTimer(UpdateFocusBorder, 33)
         UpdateFocusBorder()
         DebugLog("Focus border started; width=" Config["focusBorderWidth"]
             "; color=#" Config["focusBorderColor"])
@@ -36,6 +47,7 @@ StartFocusBorder() {
 StopFocusBorder(*) {
     global FocusBorder
     try SetTimer(UpdateFocusBorder, 0)
+    StopFocusBorderLocationTracking()
     for edge in FocusBorder.edges {
         try edge.Destroy()
     }
@@ -44,10 +56,121 @@ StopFocusBorder(*) {
     FocusBorder.lastState := ""
 }
 
+StartFocusBorderLocationTracking() {
+    global FocusBorder
+    static EVENT_OBJECT_LOCATIONCHANGE := 0x800B
+    static EVENT_SYSTEM_FOREGROUND := 0x0003
+    static WINEVENT_OUTOFCONTEXT := 0
+    static WINEVENT_SKIPOWNPROCESS := 0x2
+
+    try {
+        FocusBorder.locationEventCallback := CallbackCreate(
+            HandleFocusBorderLocationChange, , 7)
+        FocusBorder.locationEventHook := DllCall(
+            "User32\SetWinEventHook",
+            "uint", EVENT_OBJECT_LOCATIONCHANGE,
+            "uint", EVENT_OBJECT_LOCATIONCHANGE,
+            "ptr", 0,
+            "ptr", FocusBorder.locationEventCallback,
+            "uint", 0,
+            "uint", 0,
+            "uint", WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            "ptr")
+        if !FocusBorder.locationEventHook
+            throw OSError(A_LastError, "SetWinEventHook focus border")
+        FocusBorder.foregroundEventCallback := CallbackCreate(
+            HandleFocusBorderForegroundChange, , 7)
+        FocusBorder.foregroundEventHook := DllCall(
+            "User32\SetWinEventHook",
+            "uint", EVENT_SYSTEM_FOREGROUND,
+            "uint", EVENT_SYSTEM_FOREGROUND,
+            "ptr", 0,
+            "ptr", FocusBorder.foregroundEventCallback,
+            "uint", 0,
+            "uint", 0,
+            "uint", WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            "ptr")
+        if !FocusBorder.foregroundEventHook
+            throw OSError(A_LastError, "SetWinEventHook focus foreground")
+        DebugLog("Focus border location tracking enabled")
+    } catch Error as err {
+        if FocusBorder.locationEventHook {
+            try DllCall("User32\UnhookWinEvent",
+                "ptr", FocusBorder.locationEventHook)
+        }
+        if FocusBorder.locationEventCallback {
+            try CallbackFree(FocusBorder.locationEventCallback)
+            FocusBorder.locationEventCallback := 0
+        }
+        FocusBorder.locationEventHook := 0
+        if FocusBorder.foregroundEventHook {
+            try DllCall("User32\UnhookWinEvent",
+                "ptr", FocusBorder.foregroundEventHook)
+        }
+        if FocusBorder.foregroundEventCallback {
+            try CallbackFree(FocusBorder.foregroundEventCallback)
+            FocusBorder.foregroundEventCallback := 0
+        }
+        FocusBorder.foregroundEventHook := 0
+        DebugLog("Focus border location tracking unavailable: "
+            ErrorDescription(err))
+    }
+}
+
+StopFocusBorderLocationTracking() {
+    global FocusBorder
+    if FocusBorder.locationEventHook {
+        try DllCall("User32\UnhookWinEvent",
+            "ptr", FocusBorder.locationEventHook)
+    }
+    if FocusBorder.foregroundEventHook {
+        try DllCall("User32\UnhookWinEvent",
+            "ptr", FocusBorder.foregroundEventHook)
+    }
+    if FocusBorder.locationEventCallback {
+        try CallbackFree(FocusBorder.locationEventCallback)
+    }
+    if FocusBorder.foregroundEventCallback {
+        try CallbackFree(FocusBorder.foregroundEventCallback)
+    }
+    FocusBorder.locationEventHook := 0
+    FocusBorder.locationEventCallback := 0
+    FocusBorder.foregroundEventHook := 0
+    FocusBorder.foregroundEventCallback := 0
+}
+
+HandleFocusBorderLocationChange(eventHook, event, hwnd, idObject, idChild,
+    eventThread, eventTime) {
+    global FocusBorder
+    static OBJID_WINDOW := 0
+    if !FocusBorder.enabled || (idObject != OBJID_WINDOW) || idChild
+        return
+    if (hwnd != WinExist("A"))
+        return
+    ; Schedule instead of drawing from the system callback, which coalesces a
+    ; burst of move/resize notifications into one normal AutoHotkey thread.
+    SetTimer(UpdateFocusBorder, -1)
+}
+
+HandleFocusBorderForegroundChange(eventHook, event, hwnd, idObject, idChild,
+    eventThread, eventTime) {
+    global FocusBorder
+    if !FocusBorder.enabled
+        return
+    ; A close or activation can change the focused window without generating a
+    ; location event for the next target.
+    SetTimer(UpdateFocusBorder, -1)
+}
+
 UpdateFocusBorder(*) {
     global FocusBorder
     if !FocusBorder.enabled
         return
+
+    if !IsTilingModeActive() {
+        HideFocusBorder("floating-layout")
+        return
+    }
 
     hwnd := WinExist("A")
     if !hwnd || !IsHighlightableWindow(hwnd) {
@@ -108,7 +231,10 @@ SetFocusBorderEdgeRect(hwnd, rect) {
     static SWP_NOACTIVATE := 0x0010
     static SWP_SHOWWINDOW := 0x0040
     static SWP_NOOWNERZORDER := 0x0200
-    flags := SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER
+    static SWP_FRAMECHANGED := 0x0020
+    ; Reapply the frame styles while showing each edge. This prevents Windows
+    ; from leaving a reused tool window behind its newly focused target.
+    flags := SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER | SWP_FRAMECHANGED
     if !DllCall("User32\SetWindowPos",
         "ptr", hwnd,
         "ptr", HWND_TOPMOST,

@@ -1,8 +1,12 @@
-; Defaults plus a deliberately small TOML reader. The user-facing configuration
-; lives in config.toml so settings can be changed without editing manager code.
-global ConfigLoadMessages := []
-global Config := BuildDefaultConfig()
-LoadConfigFile(A_ScriptDir "\config.toml")
+; Defaults plus a deliberately small TOML reader. User-editable files live in
+; the config directory so settings can be changed without editing manager code.
+InitializeConfig() {
+    global ConfigDirectory, ConfigLoadMessages, Config
+    ConfigDirectory := A_ScriptDir "\config"
+    ConfigLoadMessages := []
+    Config := BuildDefaultConfig()
+    LoadConfigFile(ConfigDirectory "\config.toml")
+}
 
 BuildDefaultConfig() {
     return Map(
@@ -12,6 +16,8 @@ BuildDefaultConfig() {
         "defaultGap", 12,
         "gapStep", 4,
         "minGap", 0,
+        "defaultLayout", "vertical",
+        "virtualDesktopsEnabled", true,
         "masterRatio", 0.58,
         "masterRatioStep", 0.04,
         "minMasterRatio", 0.30,
@@ -35,7 +41,7 @@ BuildDefaultConfig() {
             "movePrevious", "#+k",
             "swapMaster", "#m",
             "closeWindow", "#w"
-            , "showHotkeys", "#i"
+            , "showHotkeys", "#h"
         )
     )
 }
@@ -43,14 +49,14 @@ BuildDefaultConfig() {
 LoadConfigFile(path) {
     global Config, ConfigLoadMessages
     if !FileExist(path) {
-        ConfigLoadMessages.Push("config.toml not found; built-in defaults are active")
+        ConfigLoadMessages.Push("config\config.toml not found; built-in defaults are active")
         return
     }
 
     section := ""
     try lines := StrSplit(FileRead(path, "UTF-8"), "`n", "`r")
     catch Error as err {
-        ConfigLoadMessages.Push("could not read config.toml: " err.Message)
+        ConfigLoadMessages.Push("could not read config\config.toml: " err.Message)
         return
     }
 
@@ -102,7 +108,7 @@ LoadConfigFile(path) {
             target[key] := value
         }
     }
-    ConfigLoadMessages.Push("loaded config.toml")
+    ConfigLoadMessages.Push("loaded config\config.toml")
 }
 
 ParseTomlValue(value, lineNumber) {

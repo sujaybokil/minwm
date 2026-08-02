@@ -12,6 +12,12 @@ defaultGap = 12
 gapStep = 4
 minGap = 0
 
+# Initial layout for each virtual desktop: vertical, horizontal, maximized, or floating.
+defaultLayout = "vertical"
+
+# Manage six Windows virtual-desktop workspaces and enable Win+1 through Win+6.
+virtualDesktopsEnabled = true
+
 # The first tiled window is the master. The remaining windows form the stack.
 masterRatio = 0.58
 masterRatioStep = 0.04
@@ -42,4 +48,4 @@ moveNext = "#+j"
 movePrevious = "#+k"
 swapMaster = "#m"
 closeWindow = "#w"
-showHotkeys = "#i"
+showHotkeys = "#h"

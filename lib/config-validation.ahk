@@ -12,6 +12,8 @@ ValidateConfig() {
     ValidateIntegerSetting("minGap", 0, 1000, defaults)
     ValidateIntegerSetting("debugMaxSizeMb", 1, 100, defaults)
     ValidateIntegerSetting("focusBorderWidth", 0, 10, defaults)
+    ValidateDefaultLayout(defaults)
+    ValidateBooleanSetting("virtualDesktopsEnabled", defaults)
 
     ValidateNumberSetting("masterRatio", 0.05, 0.95, defaults)
     ValidateNumberSetting("masterRatioStep", 0.01, 0.50, defaults)
@@ -61,6 +63,31 @@ ValidateColorSetting(name, defaults) {
     }
     ConfigLoadMessages.Push(name " must be a six-digit RGB hex color; using "
         defaults[name])
+    Config[name] := defaults[name]
+}
+
+ValidateDefaultLayout(defaults) {
+    global Config, ConfigLoadMessages
+    value := Config["defaultLayout"]
+    if (Type(value) = "String") {
+        value := StrLower(Trim(value))
+        if (value = "vertical" || value = "horizontal"
+            || value = "maximized" || value = "floating") {
+            Config["defaultLayout"] := value
+            return
+        }
+    }
+    ConfigLoadMessages.Push("defaultLayout must be vertical, horizontal, maximized, or floating; using "
+        defaults["defaultLayout"])
+    Config["defaultLayout"] := defaults["defaultLayout"]
+}
+
+ValidateBooleanSetting(name, defaults) {
+    global Config, ConfigLoadMessages
+    if (Type(Config[name]) = "Integer"
+        && (Config[name] = true || Config[name] = false))
+        return
+    ConfigLoadMessages.Push(name " must be true or false; using " defaults[name])
     Config[name] := defaults[name]
 }
 

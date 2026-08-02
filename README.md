@@ -5,24 +5,27 @@
 [![AutoHotkey v2](https://img.shields.io/badge/AutoHotkey-v2.0.26-334455.svg)](https://github.com/AutoHotkey/AutoHotkey)
 
 `minwm` is a small, keyboard-driven tiling window manager for Windows, written
-in AutoHotkey v2.
+in AutoHotkey v2. It was created for personal use and is released under the
+MIT License for anyone to use, modify, and share.
 
-> [!WARNING]
-> **Work in progress.** minwm is usable, but it is still pre-1.0 software.
-> Configuration keys, tiling behavior, and installer details may change between
-> releases. Please report reproducible problems with a short debug-log excerpt.
+> [!NOTE]
+> This is a stable personal project rather than an actively developed product.
+> It is provided as-is; please use the issue tracker for reproducible defects.
 
 ## Why minwm?
 
-- Vertical and horizontal master-stack layouts, plus a floating mode
+- Vertical and horizontal master-stack layouts, a maximized mode, and a
+  non-interfering floating mode
 - Native application minimum-size handling
 - Constraint-aware reflow: if every window cannot fit, the largest constrained
   window floats and the remaining set is tiled again
 - DWM visible-frame positioning for Electron and other custom-framed windows
 - Physical-pixel geometry across mixed-DPI monitors
 - Stable keyboard reordering and master promotion
+- Six Windows virtual-desktop workspaces with independent tiling state
 - Configurable 1px white focused-window border (`0` disables it)
-- Lightweight tray controls and optional startup-at-logon setup
+- Lightweight tray controls, including a hotkey reference, and optional
+  startup-at-logon setup
 - Opt-in, size-limited diagnostic logging
 
 ## Requirements
@@ -35,29 +38,44 @@ minwm**. The installer locates and uses the runtime already installed on the
 user's machine. Its separate GPL-2.0 license is documented in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+The release installer offers an optional **Direct virtual-desktop switching**
+component. When selected (the default), it installs the MIT-licensed
+[VirtualDesktop V1.21](https://github.com/MScholtes/VirtualDesktop/releases/tag/V1.21)
+helper for direct, non-animated Windows 11 switches. It is not required:
+deselect it to use minwm with the standard Windows shortcut switching instead.
+The helper binaries are not stored in this repository; release builds download
+their pinned versions and verify SHA-256 hashes before packaging them.
+
 ## Install
 
-There is no published binary release yet. Run minwm from source or build the
-installer locally while the project is in its work-in-progress phase.
+Download the latest `minwm-setup.exe` from the project's GitHub Releases page,
+or build the installer locally from source.
 
 ### Local installer
 
-Build `minwm-setup.exe` with `.\tools\Build-Installer.ps1`. The installer:
+Build `minwm-setup.exe` with `.\tools\installer.ps1`. The installer:
 
 - requires an existing AutoHotkey v2 installation;
 - installs for the current user under `%LOCALAPPDATA%\minwm`;
-- preserves an existing `config.toml` during upgrades;
+- preserves an existing `config\config.toml` during upgrades;
+- offers a default-on **Virtual desktops** option that installs the helper for
+  direct, non-animated workspace jumps; deselect it to use Windows shortcut
+  switching instead;
 - offers a default-on checkbox to start minwm at logon;
 - uses a limited scheduled task when Windows permits it, otherwise a Startup
   folder shortcut; and
 - can launch minwm immediately after setup.
+
+The build script downloads the optional VirtualDesktop helper only into the
+ignored `dependencies\` build directory, verifies its pinned SHA-256 hashes,
+and never adds its binaries to the repository.
 
 The resulting installer is not currently code-signed, so Windows SmartScreen may show an
 unknown-publisher warning. Verify release downloads against the SHA-256 digest
 you calculate for the local build before sharing it.
 
 Uninstalling removes the installation directory, including its configuration
-and logs. Copy `config.toml` elsewhere first if you want to keep it.
+and logs. Copy the `config` directory elsewhere first if you want to keep it.
 
 ### Run from source
 
@@ -72,16 +90,17 @@ installed it another way.
 
 ## Keybindings
 
-All bindings are configurable in `config.toml`. Restart minwm after editing the
-file.
+All bindings except the fixed workspace selectors are configurable in
+`config\config.toml`. Restart minwm after editing the file.
 
-Only normal, resizable, unowned top-level windows are tiled. Standard dialogs,
-modal frames, tool windows, owned transient windows, and `WS_POPUP` windows are
-always excluded.
+Only normal, resizable, unowned top-level windows are tiled. Start, Windows
+Search, standard dialogs, modal frames, tool windows, owned transient windows,
+and `WS_POPUP` windows are always excluded.
 
 | Default | Action |
 | --- | --- |
-| `Win+T` | Cycle vertical, horizontal, and floating layouts |
+| `Win+T` | Cycle vertical, horizontal, maximized, and floating layouts |
+| `Win+1` … `Win+6` | Switch to virtual desktop D1 … D6 |
 | `Win+R` | Re-tile the active monitor |
 | `Win+[` / `Win+]` | Decrease / increase gaps |
 | `Win+Shift+[` / `Win+Shift+]` | Decrease / increase the master area |
@@ -89,11 +108,24 @@ always excluded.
 | `Win+Shift+J` / `Win+Shift+K` | Move the focused window in tiling order |
 | `Win+M` | Promote the focused window to master |
 | `Win+W` | Close the focused window |
-| `Win+I` | Show the configured hotkey reference |
+| `Win+H` | Show the configured hotkey reference |
+
+On startup, minwm preserves existing Windows virtual desktops and creates only
+enough new desktops to reach six. Each desktop keeps its own layout, gaps,
+master ratio, window order, and constraint-float state. A small translucent
+`D1`–`D6` indicator stays over the bottom-left of the primary taskbar. The workspace shortcuts
+are fixed; other bindings remain configurable. On supported Windows 11 builds,
+switching directly from (for example) D1 to D6 does not visit intermediate
+desktops or play their transitions.
+
+Floating mode is intentionally hands-off: minwm does not resize, maximize,
+reorder, or focus windows through tiling controls, and hides the focused-window
+border. Maximized mode instead enforces maximization for every eligible window
+on the active monitor.
 
 ## Configuration
 
-`config.toml` supports the settings below. The parser intentionally implements
+`config\config.toml` supports the settings below. The parser intentionally implements
 only the TOML subset used by this file: strings, booleans, numbers, arrays of
 strings, and the `[hotkeys]` table.
 
@@ -105,18 +137,39 @@ strings, and the `[hotkeys]` table.
 | `defaultGap` | `12` | Initial outer and inner gap in pixels |
 | `gapStep` | `4` | Gap adjustment per hotkey press |
 | `minGap` | `0` | Lowest permitted gap |
+| `defaultLayout` | `vertical` | Initial layout for each virtual desktop: `vertical`, `horizontal`, `maximized`, or `floating` |
+| `virtualDesktopsEnabled` | `true` | Manage six Windows virtual-desktop workspaces and enable `Win+1` … `Win+6`; set `false` to disable this feature |
 | `masterRatio` | `0.58` | Initial master share |
 | `masterRatioStep` | `0.04` | Master-share adjustment per hotkey press |
 | `minMasterRatio` | `0.30` | Lowest permitted master share |
 | `maxMasterRatio` | `0.75` | Highest permitted master share |
 | `debugLogPath` | `minwm-debug.log` | Diagnostic log path |
 | `debugMaxSizeMb` | `5` | Rotate the diagnostic log at this size |
-| `focusBorderWidth` | `1` | Focus border thickness; `0` disables it |
+| `focusBorderWidth` | `1` | Focus border thickness; `0` disables it; tracks live moves and resizes |
 | `focusBorderColor` | `FFFFFF` | Focus border color as six-digit RGB hex |
 | `excludedClasses` | Windows shell/dialog classes | Window classes never tiled |
 
 Invalid values fall back to safe defaults. Those corrections are written to the
 debug log when debug mode is enabled.
+
+### Custom hotkeys
+
+Create `config\custom-hotkeys.ahk` beside `config.toml` to add custom bindings,
+such as shortcuts that launch applications. If the file is absent, minwm does
+not start a custom-hotkeys process.
+
+For example:
+
+```ahk
+#Requires AutoHotkey v2.0
+#n::Run("notepad.exe")
+```
+
+The script runs through the user's installed AutoHotkey runtime in a supervised
+companion process and exits with minwm. Bindings reserved by minwm's `[hotkeys]`
+table, plus the fixed `Win+1` … `Win+6` workspace shortcuts, are disabled in
+the companion process, so built-in behavior can only be changed through TOML.
+It is arbitrary executable code, so only configure a script you trust.
 
 ## How constraint-aware tiling works
 
@@ -173,7 +226,7 @@ Build the installer with AutoHotkey v2.0.26 or newer v2 and Inno Setup 6
 installed:
 
 ```powershell
-.\tools\Build-Installer.ps1
+.\tools\installer.ps1
 ```
 
 Generated installers live under `dist\`, which is ignored by Git. CI installs
@@ -185,19 +238,25 @@ The main modules are:
 | Path | Responsibility |
 | --- | --- |
 | `minwm.ahk` | Controller, hotkeys, tray, and refresh lifecycle |
+| `minwm-check.ahk` | Test-only module and configuration smoke-test entry point |
 | `config.ahk` | Minimal TOML loading and defaults |
 | `lib/windows.ahk` | Win32 discovery, geometry, DPI, and minimum sizes |
+| `lib/virtual-desktops.ahk` | Windows desktop discovery, provisioning, switching, and membership |
+| `lib/workspace-state.ahk` | Independent tiling state for each virtual desktop |
+| `lib/desktop-indicator.ahk` | Primary-taskbar workspace indicator |
+| `lib/layout-notification.ahk` | Transient layout-change confirmation |
 | `lib/constraints.ahk` | Pure fit and constrained-allocation algorithms |
 | `lib/selection.ahk` | Maps constraint decisions to real windows |
 | `lib/layouts.ahk` | Master-stack layout and window movement |
 | `lib/debug.ahk` | Opt-in diagnostics and log rotation |
+| `lib/custom-hotkeys.ahk` | Supervised loading of custom hotkey scripts |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Current limitations
 
-- minwm reflows the monitor containing the focused window; it is not yet a
-  virtual-desktop workspace manager.
+- minwm reflows only the monitor containing the focused window; this also
+  scopes maximized-mode enforcement.
 - Elevated windows cannot be controlled by a non-elevated minwm process.
 - Some applications ignore or dynamically change their Win32 minimum-size
   contract.

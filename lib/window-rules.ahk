@@ -11,3 +11,16 @@ HasDialogOrPopupSemantics(style, exStyle, className, ownerHwnd) {
         || (exStyle & WS_EX_TOOLWINDOW)
         || (exStyle & WS_EX_NOACTIVATE)
 }
+
+IsWindowsStartMenuOrSearch(processName) {
+    ; These shell surfaces have resizable top-level windows, so style checks
+    ; alone can mistake them for normal application windows. SearchApp and
+    ; SearchUI cover older supported Windows builds.
+    static shellProcesses := Map(
+        "startmenuexperiencehost.exe", true,
+        "searchhost.exe", true,
+        "searchapp.exe", true,
+        "searchui.exe", true
+    )
+    return shellProcesses.Has(StrLower(processName))
+}
