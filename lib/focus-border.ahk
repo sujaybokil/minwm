@@ -167,8 +167,8 @@ UpdateFocusBorder(*) {
     if !FocusBorder.enabled
         return
 
-    if !IsTilingModeActive() {
-        HideFocusBorder("floating-layout")
+    if !IsFocusBorderLayoutActive() {
+        HideFocusBorder("non-tiled-layout")
         return
     }
 
@@ -188,21 +188,24 @@ UpdateFocusBorder(*) {
 }
 
 IsHighlightableWindow(hwnd) {
-    global Config
+    global Manager
     try {
-        if !DllCall("User32\IsWindowVisible", "ptr", hwnd, "int")
-            return false
-        if (WinGetMinMax("ahk_id " hwnd) = -1)
-            return false
-        if (WinGetExStyle("ahk_id " hwnd) & 0x80) ; WS_EX_TOOLWINDOW
-            return false
-        if Config["excludedClasses"].Has(WinGetClass("ahk_id " hwnd))
-            return false
-        rect := GetVisibleWindowRect(hwnd)
-        return RectWidth(rect) > 0 && RectHeight(rect) > 0
+        ; Manager.order contains the windows selected for the current tiled
+        ; layout.  Reuse the normal eligibility predicate as well, so dialogs,
+        ; notifications, fixed/small windows, and excluded classes never gain
+        ; a focus border even when they become foreground.
+        return IsEligibleWindow(hwnd)
+            && FindWindowIndex(Manager.order, hwnd) != 0
     } catch {
         return false
     }
+}
+
+IsFocusBorderLayoutActive() {
+    global Manager
+    ; Maximized windows already have a clear system frame; only the split
+    ; tiling layouts need an additional focus indicator.
+    return Manager.layout = "vertical" || Manager.layout = "horizontal"
 }
 
 PositionFocusBorderPhysical(hwnd) {

@@ -291,6 +291,9 @@ RefreshLayoutPhysical() {
     ApplyLayout(Manager.layout, Manager.order, area, Manager.gap, Manager.masterRatio)
     CenterConstraintFloatingWindows(
         Manager.constraintFloats, area, Manager.gap)
+    ; WinMove completes synchronously, so redraw against the new DWM frame
+    ; instead of waiting for the next focus or polling event.
+    UpdateFocusBorder()
 }
 
 LogConstraintSelection(selection) {
@@ -351,8 +354,8 @@ CycleLayout() {
     Manager.lastLayoutState := ""
     DebugLog("Layout changed: " previous " -> " Manager.layout)
     UpdateTrayTip()
-    if !IsTilingModeActive()
-        HideFocusBorder("floating-layout")
+    if !IsFocusBorderLayoutActive()
+        HideFocusBorder("non-tiled-layout")
     ShowLayoutNotification(Manager.layout)
     RefreshLayout()
 }
