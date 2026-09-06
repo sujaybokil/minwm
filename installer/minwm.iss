@@ -33,7 +33,7 @@ UninstallDisplayIcon={app}\assets\minwm.ico
 [Files]
 Source: "..\minwm.ahk"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\config.ahk"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\config\config.toml"; DestDir: "{app}\config"; Flags: onlyifdoesntexist
+Source: "..\config\default-config.toml"; DestDir: "{app}\config"; Flags: ignoreversion
 Source: "..\lib\*.ahk"; DestDir: "{app}\lib"; Flags: ignoreversion
 Source: "..\dependencies\virtualdesktop\VirtualDesktop11.exe"; DestDir: "{app}\bin"; Flags: ignoreversion; Tasks: virtualdesktophelper
 Source: "..\dependencies\virtualdesktop\VirtualDesktop11-24H2.exe"; DestDir: "{app}\bin"; Flags: ignoreversion; Tasks: virtualdesktophelper
@@ -146,94 +146,28 @@ begin
       mbError, MB_OK);
 end;
 
-procedure MigrateConfigurationDirectory();
+procedure MigrateUserFile(FileName: String);
 var
-  LegacyConfigPath: String;
-  ConfigDirectory: String;
-  ConfigPath: String;
+  LegacyPath: String;
+  UserDirectory: String;
+  UserPath: String;
 begin
-  LegacyConfigPath := ExpandConstant('{app}\config.toml');
-  ConfigDirectory := ExpandConstant('{app}\config');
-  ConfigPath := AddBackslash(ConfigDirectory) + 'config.toml';
-  if FileExists(ConfigPath) or not FileExists(LegacyConfigPath) then
+  LegacyPath := AddBackslash(ExpandConstant('{app}\config')) + FileName;
+  if not FileExists(LegacyPath) and (FileName = 'config.toml') then
+    LegacyPath := ExpandConstant('{app}\config.toml');
+  UserDirectory := ExpandConstant('{userappdata}\minwm');
+  UserPath := AddBackslash(UserDirectory) + FileName;
+  if FileExists(UserPath) or not FileExists(LegacyPath) then
     exit;
-  if not ForceDirectories(ConfigDirectory) then
+  if not ForceDirectories(UserDirectory) then
   begin
-    Log('Could not create the minwm configuration directory for migration.');
+    Log('Could not create the user configuration directory for migration.');
     exit;
   end;
-  if RenameFile(LegacyConfigPath, ConfigPath) then
-    Log('Migrated config.toml into the configuration directory.')
+  if RenameFile(LegacyPath, UserPath) then
+    Log('Migrated ' + FileName + ' into the user configuration directory.')
   else
-    Log('Could not migrate the existing config.toml into the configuration directory.');
-end;
-
-procedure EnsureOptionalConfig();
-var
-  ConfigPath: String;
-  Contents: AnsiString;
-  Addition: AnsiString;
-begin
-  ConfigPath := ExpandConstant('{app}\config\config.toml');
-  if not LoadStringFromFile(ConfigPath, Contents) then
-    exit;
-
-  Addition := '';
-  if Pos('focusBorderWidth', Contents) = 0 then
-    Addition := Addition + 'focusBorderWidth = 1' + #13#10;
-  if Pos('focusBorderColor', Contents) = 0 then
-    Addition := Addition + 'focusBorderColor = "FFFFFF"' + #13#10;
-  if Pos('defaultLayout', Contents) = 0 then
-    Addition := Addition + 'defaultLayout = "vertical"' + #13#10;
-  if Pos('virtualDesktopsEnabled', Contents) = 0 then
-    Addition := Addition + 'virtualDesktopsEnabled = true' + #13#10;
-  if Addition = '' then
-    exit;
-
-  Log('Adding new optional settings to the preserved config.toml.');
-  SaveStringToFile(ConfigPath,
-    Chr(13) + Chr(10) +
-    '# Optional focus-border settings.' + #13#10 +
-    Addition, True);
-end;
-
-procedure MigrateDefaultHotkeys();
-var
-  ConfigPath: String;
-  Contents: AnsiString;
-  MatchPosition: Integer;
-  Changed: Boolean;
-  OldBinding: AnsiString;
-  NewBinding: AnsiString;
-begin
-  ConfigPath := ExpandConstant('{app}\config\config.toml');
-  if not LoadStringFromFile(ConfigPath, Contents) then
-    exit;
-  Changed := False;
-
-  OldBinding := 'swapMaster = "#Enter"';
-  NewBinding := 'swapMaster = "#m"';
-  MatchPosition := Pos(OldBinding, Contents);
-  if MatchPosition <> 0 then
-  begin
-    Delete(Contents, MatchPosition, Length(OldBinding));
-    Insert(NewBinding, Contents, MatchPosition);
-    Log('Migrating the unchanged promote-to-master hotkey from Win+Enter to Win+M.');
-    Changed := True;
-  end;
-
-  OldBinding := 'showHotkeys = "#i"';
-  NewBinding := 'showHotkeys = "#h"';
-  MatchPosition := Pos(OldBinding, Contents);
-  if MatchPosition <> 0 then
-  begin
-    Delete(Contents, MatchPosition, Length(OldBinding));
-    Insert(NewBinding, Contents, MatchPosition);
-    Log('Migrating the unchanged hotkey-reference binding from Win+I to Win+H.');
-    Changed := True;
-  end;
-  if Changed then
-    SaveStringToFile(ConfigPath, Contents, False);
+    Log('Could not migrate ' + FileName + ' into the user configuration directory.');
 end;
 
 function CreateMinwmLogonTask(): Boolean;
@@ -310,7 +244,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
   begin
-    MigrateConfigurationDirectory();
+    MigrateUserFile('config.toml');
+    MigrateUserFile('custom-hotkeys.ahk');
+    MigrateUserFile('layout-state.ini');
     Log('Removing an existing minwm Startup-folder fallback before replacement.');
     DeleteFile(ExpandConstant('{userstartup}\minwm.lnk'));
     if not WizardIsTaskSelected('virtualdesktophelper') then
@@ -325,8 +261,6 @@ begin
   end
   else if CurStep = ssPostInstall then
   begin
-    EnsureOptionalConfig();
-    MigrateDefaultHotkeys();
     DeleteFile(ExpandConstant('{userstartup}\minwm.lnk'));
     if WizardIsTaskSelected('startatlogon') then
     begin

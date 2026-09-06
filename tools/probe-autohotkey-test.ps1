@@ -17,7 +17,7 @@ if (!(Test-Path -LiteralPath $scriptFullPath)) {
     throw "Test script was not found: $scriptFullPath"
 }
 if (!$AutoHotkeyPath) {
-    $AutoHotkeyPath = & (Join-Path $PSScriptRoot 'Get-AutoHotkeyPath.ps1')
+    $AutoHotkeyPath = & (Join-Path $PSScriptRoot 'get-autohotkey-path.ps1')
 }
 
 $reportDirectory = Join-Path $projectRoot 'test-results'

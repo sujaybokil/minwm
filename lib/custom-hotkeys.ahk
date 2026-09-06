@@ -3,6 +3,10 @@
 ; minwm parent process and exits even if minwm is terminated without OnExit.
 StartCustomHotkeys(reservedHotkeys := "") {
     global Config, ConfigDirectory
+    if !Config["customHotkeysEnabled"] {
+        DebugLog("Custom hotkeys disabled by configuration")
+        return
+    }
     state := GetCustomHotkeysState()
     scriptPath := ConfigDirectory "\custom-hotkeys.ahk"
     if !FileExist(scriptPath) {

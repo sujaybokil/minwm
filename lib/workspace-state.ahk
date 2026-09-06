@@ -1,18 +1,21 @@
-; Workspace-local tiling state.  The controller assigns Manager to the state
-; for the active Windows virtual desktop, so existing layout code remains
-; deliberately unaware of desktop switching.
+; Tiling state is local to both a Windows virtual desktop and a physical
+; monitor.  Manager remains the focused monitor's state so the command layer
+; can stay small, while refreshes visit every monitor in the workspace.
 InitializeWorkspaceStateStore() {
     global WorkspaceStates
     WorkspaceStates := Map()
 }
 
-CreateWorkspaceManagerState() {
+CreateWorkspaceManagerState(desktopId := "") {
     global Config
     return {
-        layout: Config["defaultLayout"],
+        layout: GetInitialWorkspaceLayout(desktopId),
         gap: Config["defaultGap"],
+        smartGaps: Config["smartGapsEnabled"],
         masterRatio: Config["masterRatio"],
         order: [],
+        temporaryFloats: Map(),
+        scratchpad: { hwnd: 0, rect: "", visible: false, orderIndex: 0 },
         constraintFloats: [],
         lastConstraintStatus: "",
         lastLayoutState: "",
@@ -20,14 +23,46 @@ CreateWorkspaceManagerState() {
     }
 }
 
-ActivateWorkspace(desktopId) {
-    global Manager, WorkspaceStates
+ActivateWorkspace(desktopId, area := "") {
+    global Manager
     if (desktopId = "")
         return false
-    if !WorkspaceStates.Has(desktopId)
-        WorkspaceStates[desktopId] := CreateWorkspaceManagerState()
-    Manager := WorkspaceStates[desktopId]
+    if !IsObject(area)
+        area := GetActiveMonitorArea()
+    Manager := GetWorkspaceMonitorState(desktopId, area)
     return true
+}
+
+GetWorkspaceManagerState(desktopId) {
+    global WorkspaceStates
+    if !WorkspaceStates.Has(desktopId)
+        WorkspaceStates[desktopId] := Map()
+    return WorkspaceStates[desktopId]
+}
+
+GetWorkspaceMonitorState(desktopId, area) {
+    workspace := GetWorkspaceManagerState(desktopId)
+    identity := GetMonitorIdentity(area)
+    if !workspace.Has(identity)
+        workspace[identity] := CreateWorkspaceManagerState(desktopId)
+    return workspace[identity]
+}
+
+GetInitialWorkspaceLayout(desktopId) {
+    global Config, VirtualDesktops
+    if !VirtualDesktops.enabled
+        return Config["defaultLayout"]
+    for index, candidateId in VirtualDesktops.desktopIds {
+        if (candidateId = desktopId)
+            return Config["desktop" index "Layout"]
+    }
+    return Config["defaultLayout"]
+}
+
+GetMonitorIdentity(area) {
+    try return MonitorGetName(area.index)
+    catch
+        return "monitor-" area.index
 }
 
 PruneWorkspaceStates(desktopIds) {

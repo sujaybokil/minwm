@@ -13,7 +13,7 @@ $virtualDesktopFiles = @{
     'VirtualDesktop11.exe' = 'F6532DB79F6F0E4018CE77F08805D3FD3F7BB076CBFBAC0AC8189FE5376D9E82'
     'VirtualDesktop11-24H2.exe' = '8334B529D19E71662950821C91ED996A0E92DF41C8D0A077E95151AA7041CB35'
 }
-& (Join-Path $PSScriptRoot 'Prepare-Dependencies.ps1')
+& (Join-Path $PSScriptRoot 'prepare-dependencies.ps1')
 foreach ($file in $virtualDesktopFiles.GetEnumerator()) {
     $path = Join-Path $virtualDesktopDependencyPath $file.Key
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash
@@ -26,7 +26,7 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 if (!$AutoHotkeyPath) {
-    $AutoHotkeyPath = & (Join-Path $PSScriptRoot 'Get-AutoHotkeyPath.ps1')
+    $AutoHotkeyPath = & (Join-Path $PSScriptRoot 'get-autohotkey-path.ps1')
 }
 if (!(Test-Path -LiteralPath $AutoHotkeyPath)) {
     throw "AutoHotkey v2 was not found. Install it with Scoop or pass -AutoHotkeyPath."
@@ -38,8 +38,8 @@ if ([version]$actualAutoHotkeyVersion -lt [version]$autoHotkeyVersion -or
     throw "AutoHotkey $autoHotkeyVersion or newer v2 is required; found $actualAutoHotkeyVersion."
 }
 
-& (Join-Path $PSScriptRoot 'New-MinwmIcon.ps1')
-& (Join-Path $PSScriptRoot 'Test.ps1') -AutoHotkeyPath $AutoHotkeyPath
+& (Join-Path $PSScriptRoot 'new-minwm-icon.ps1')
+& (Join-Path $PSScriptRoot 'tests.ps1') -AutoHotkeyPath $AutoHotkeyPath
 
 if (!$InnoCompilerPath) {
     $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue

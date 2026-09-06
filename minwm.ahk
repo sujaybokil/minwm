@@ -10,33 +10,45 @@ SetTimer(InitializeMinwm, -1)
 #Include "lib\window-rules.ahk"
 #Include "lib\windows.ahk"
 #Include "lib\workspace-state.ahk"
+#Include "lib\smart-gaps.ahk"
+#Include "lib\temporary-float.ahk"
+#Include "lib\scratchpad.ahk"
+#Include "lib\workspace-refresh.ahk"
+#Include "lib\window-refresh-events.ahk"
 #Include "lib\virtual-desktops.ahk"
 #Include "lib\focus-border.ahk"
 #Include "lib\desktop-indicator.ahk"
 #Include "lib\layout-notification.ahk"
+#Include "lib\layout-cycle.ahk"
+#Include "lib\layout-state.ahk"
+#Include "lib\navigation.ahk"
 #Include "lib\constraints.ahk"
 #Include "lib\selection.ahk"
 #Include "lib\layouts.ahk"
 #Include "lib\custom-hotkeys.ahk"
 
 InitializeMinwm() {
-    global Manager, StartupMessages, HotkeyHelpGui
+    global IntegrationTestMode, LogPathWasSpecified, Manager, StartupMessages, HotkeyHelpGui
     InitializeConfig()
     ValidateConfig()
     InitializeWindowsState()
+    InitializeWindowRefreshEventsState()
     InitializeWorkspaceStateStore()
+    InitializeLayoutStatePersistence()
     InitializeVirtualDesktopState()
     InitializeFocusBorderState()
     InitializeDesktopIndicatorState()
     InitializeLayoutNotificationState()
     Manager := CreateWorkspaceManagerState()
+    InitializeLayoutCycleState()
     StartupMessages := []
+    LogPathWasSpecified := false
     HotkeyHelpGui := ""
 
     ApplyCommandLineOptions()
     InitializeDebugLog()
-    DebugLog("minwm starting; debug=" Config["debugEnabled"]
-        ", poll=" Config["pollInterval"] "ms")
+    DebugLog("minwm starting; poll=" Config["pollInterval"] "ms"
+        "; log=" Config["logPath"])
     for message in ConfigLoadMessages
         DebugLog("Config: " message)
     for message in StartupMessages
@@ -46,37 +58,47 @@ InitializeMinwm() {
             ? StartVirtualDesktopService() : false
         if !workspaceReady && !Config["virtualDesktopsEnabled"]
             DebugLog("Virtual desktops disabled by configuration")
+        LoadPersistedWorkspaceSettings()
         if workspaceReady
             ActivateWorkspace(VirtualDesktops.currentId)
-        RegisterHotkeys()
-        InitializeTray()
+        if !IntegrationTestMode {
+            RegisterHotkeys()
+            InitializeTray()
+        }
         OnExit(HandleManagerExit)
         StartFocusBorder()
         if workspaceReady
             StartDesktopIndicator()
         StartCustomHotkeys(GetReservedHotkeys())
+        StartWindowRefreshEvents()
         SetTimer(RefreshLayout, Config["pollInterval"])
         RefreshLayout()
+        if IntegrationTestMode
+            SetTimer(CompleteIntegrationTest, -500)
     } catch Error as err {
         HandleStartupFailure(err)
     }
 }
 
 HandleManagerExit(*) {
+    SetTimer(ApplyQueuedLayoutCycle, 0)
     StopCustomHotkeys()
+    StopWindowRefreshEvents()
     StopLayoutNotification()
     StopDesktopIndicator()
     StopFocusBorder()
     StopVirtualDesktopService()
+    SavePersistedWorkspaceSettings()
     DebugLog("minwm exiting")
 }
 
 HandleStartupFailure(err) {
     message := "minwm could not start: " ErrorDescription(err)
     DebugLog(message)
+    startupErrorPath := A_Temp "\minwm-startup-error.log"
     try FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") " | " message "`n",
-        A_ScriptDir "\minwm-startup-error.log", "UTF-8")
-    try MsgBox(message "`n`nCheck config\config.toml and minwm-startup-error.log.",
+        startupErrorPath, "UTF-8")
+    try MsgBox(message "`n`nCheck " UserConfigPath " and " startupErrorPath ".",
         "minwm startup error", 0x10)
     ExitApp(1)
 }
@@ -92,13 +114,26 @@ RegisterHotkeys() {
     Hotkey(keys["decreaseMaster"], (*) => ChangeMasterRatio(-Config["masterRatioStep"]))
     Hotkey(keys["focusNext"], (*) => FocusRelative(1))
     Hotkey(keys["focusPrevious"], (*) => FocusRelative(-1))
+    Hotkey(keys["focusLeft"], (*) => FocusDirectional("left"))
+    Hotkey(keys["focusRight"], (*) => FocusDirectional("right"))
+    Hotkey(keys["focusUp"], (*) => FocusDirectional("up"))
+    Hotkey(keys["focusDown"], (*) => FocusDirectional("down"))
     Hotkey(keys["moveNext"], (*) => MoveRelative(1))
     Hotkey(keys["movePrevious"], (*) => MoveRelative(-1))
+    Hotkey(keys["moveLeft"], (*) => MoveDirectional("left"))
+    Hotkey(keys["moveRight"], (*) => MoveDirectional("right"))
+    Hotkey(keys["moveUp"], (*) => MoveDirectional("up"))
+    Hotkey(keys["moveDown"], (*) => MoveDirectional("down"))
     Hotkey(keys["swapMaster"], (*) => SwapFocusedWithMaster())
     Hotkey(keys["closeWindow"], (*) => CloseFocusedWindow())
+    Hotkey(keys["toggleTemporaryFloat"], (*) => ToggleTemporaryFloat())
+    Hotkey(keys["toggleScratchpad"], (*) => ToggleScratchpad())
+    Hotkey(keys["restoreScratchpad"], (*) => RestoreScratchpadToTiling())
+    Hotkey(keys["toggleSmartGaps"], (*) => ToggleSmartGaps())
     Hotkey(keys["showHotkeys"], (*) => ShowHotkeyHelp())
+    Hotkey(keys["toggleDesktopIndicator"], (*) => ToggleDesktopIndicator())
     if VirtualDesktops.enabled {
-        Loop 6
+        Loop Config["virtualDesktopCount"]
             RegisterWorkspaceHotkey(A_Index)
     }
     DebugLog("Hotkeys registered")
@@ -106,6 +141,8 @@ RegisterHotkeys() {
 
 RegisterWorkspaceHotkey(workspaceNumber) {
     Hotkey("#" workspaceNumber, (*) => SwitchToVirtualWorkspace(workspaceNumber))
+    Hotkey("#+" workspaceNumber,
+        (*) => MoveFocusedWindowToVirtualWorkspace(workspaceNumber))
 }
 
 GetReservedHotkeys() {
@@ -114,14 +151,16 @@ GetReservedHotkeys() {
     for _, binding in Config["hotkeys"]
         reserved.Push(binding)
     if VirtualDesktops.enabled {
-        Loop 6
+        Loop Config["virtualDesktopCount"]
             reserved.Push("#" A_Index)
+        Loop Config["virtualDesktopCount"]
+            reserved.Push("#+" A_Index)
     }
     return reserved
 }
 
 InitializeTray() {
-    global ConfigDirectory, Manager
+    global ConfigDirectory, DefaultConfigPath, UserConfigPath, Manager
     try TraySetIcon(A_ScriptDir "\assets\minwm.ico")
     A_IconHidden := false
     A_IconTip := "minwm — " Manager.layout " layout"
@@ -129,11 +168,32 @@ InitializeTray() {
     A_TrayMenu.Add("Re-tile active monitor", (*) => RefreshLayout())
     A_TrayMenu.Add("Cycle layout", (*) => CycleLayout())
     A_TrayMenu.Add("Show hotkeys", (*) => ShowHotkeyHelp())
-    A_TrayMenu.Add("Open config.toml", (*) => Run("notepad.exe " Chr(34) ConfigDirectory "\config.toml" Chr(34)))
+    A_TrayMenu.Add("Open default configuration", OpenDefaultConfig)
+    A_TrayMenu.Add("Open user configuration", OpenUserConfig)
+    if !FileExist(UserConfigPath)
+        A_TrayMenu.Disable("Open user configuration")
+    A_TrayMenu.Add("Reload configuration", ReloadConfiguration)
     A_TrayMenu.Add()
     A_TrayMenu.Add("Exit minwm", (*) => ExitApp())
     UpdateTrayTip()
     DebugLog("System tray initialized")
+}
+
+OpenDefaultConfig(*) {
+    global DefaultConfigPath
+    Run("notepad.exe " Chr(34) DefaultConfigPath Chr(34))
+}
+
+OpenUserConfig(*) {
+    global UserConfigPath
+    if !FileExist(UserConfigPath)
+        return
+    Run("notepad.exe " Chr(34) UserConfigPath Chr(34))
+}
+
+ReloadConfiguration(*) {
+    DebugLog("Reloading configuration")
+    Reload()
 }
 
 UpdateTrayTip() {
@@ -159,12 +219,15 @@ ShowHotkeyHelp() {
     helpGui.AddText("w560", "minwm keybindings")
     helpGui.SetFont("s9", "Segoe UI")
     helpGui.AddText(
-        "w560", "These values are read from config\config.toml. Restart minwm after editing it.")
+        "w560", "User overrides are read from " ConfigDirectory "\config.toml. Restart minwm after editing it.")
     hotkeyList := helpGui.AddListView("w560 r18", ["Hotkey", "Behavior"])
     if VirtualDesktops.enabled {
-        Loop 6
+        Loop Config["virtualDesktopCount"] {
             hotkeyList.Add("", "Win + " A_Index,
                 "Switch to virtual desktop D" A_Index)
+            hotkeyList.Add("", "Win + Shift + " A_Index,
+                "Move focused window to D" A_Index " and follow it")
+        }
     }
     labels := GetHotkeyHelpLabels()
     for action, binding in Config["hotkeys"] {
@@ -199,11 +262,24 @@ GetHotkeyHelpLabels() {
         "decreaseMaster", "Decrease master area",
         "focusNext", "Focus next tiled window",
         "focusPrevious", "Focus previous tiled window",
+        "focusLeft", "Focus tiled window to the left",
+        "focusRight", "Focus tiled window to the right",
+        "focusUp", "Focus tiled window above",
+        "focusDown", "Focus tiled window below",
         "moveNext", "Move focused window forward",
         "movePrevious", "Move focused window backward",
+        "moveLeft", "Move focused window left",
+        "moveRight", "Move focused window right",
+        "moveUp", "Move focused window up",
+        "moveDown", "Move focused window down",
         "swapMaster", "Promote focused window to master",
         "closeWindow", "Close focused window",
-        "showHotkeys", "Show this hotkey reference"
+        "toggleTemporaryFloat", "Temporarily float or tile the focused window",
+        "toggleScratchpad", "Store or show/hide the workspace scratchpad",
+        "restoreScratchpad", "Return the workspace scratchpad to tiling",
+        "toggleSmartGaps", "Toggle gap removal for a single tiled window",
+        "showHotkeys", "Show this hotkey reference",
+        "toggleDesktopIndicator", "Show or hide the virtual-desktop indicator"
     )
 }
 
@@ -237,126 +313,83 @@ JoinText(values, separator) {
 }
 
 ApplyCommandLineOptions() {
-    global Config, StartupMessages
-    for index, argument in A_Args {
-        if (argument != "--debug")
-            continue
-        if (index = A_Args.Length) {
-            StartupMessages.Push("--debug requires true or false; debug remains disabled")
-            return
+    global Config, IntegrationTestMode, LogPathWasSpecified, StartupMessages
+    IntegrationTestMode := false
+    index := 1
+    while (index <= A_Args.Length) {
+        argument := A_Args[index]
+        if (argument = "--log-path") {
+            if (index = A_Args.Length || Trim(A_Args[index + 1]) = "") {
+                StartupMessages.Push("--log-path requires a non-empty file path; configured log path remains active")
+            } else {
+                index += 1
+                Config["logPath"] := A_Args[index]
+                LogPathWasSpecified := true
+                StartupMessages.Push("log path set from command line")
+            }
+        } else if (argument = "--integration-test") {
+            IntegrationTestMode := true
+            Config["customHotkeysEnabled"] := false
+            Config["defaultLayout"] := "floating"
+            Config["focusBorderWidth"] := 0
+            Config["layoutNotificationsEnabled"] := false
+            Config["virtualDesktopsEnabled"] := false
+            StartupMessages.Push("integration-test mode enabled: destructive desktop features are disabled")
         }
-        value := StrLower(A_Args[index + 1])
-        if (value = "true" || value = "1") {
-            Config["debugEnabled"] := true
-            StartupMessages.Push("debug logging enabled from command line")
-        } else if (value = "false" || value = "0") {
-            Config["debugEnabled"] := false
-        } else {
-            StartupMessages.Push("invalid --debug value '" value "'; debug remains disabled")
-        }
+        index += 1
+    }
+}
+
+CompleteIntegrationTest(*) {
+    DebugLog("integration test manager lifecycle completed")
+    ExitApp()
+}
+
+InitializeLayoutCycleState() {
+    global LayoutCycleState
+    LayoutCycleState := { pendingCycles: 0, manager: "" }
+}
+
+CycleLayout(*) {
+    global Config, LayoutCycleState, Manager
+    if IsObject(LayoutCycleState.manager)
+        && (ObjPtr(LayoutCycleState.manager) != ObjPtr(Manager))
+        ApplyQueuedLayoutCycle()
+    LayoutCycleState.manager := Manager
+    LayoutCycleState.pendingCycles += 1
+    ; Restarting this one-shot timer debounces rapid hotkey auto-repeat and
+    ; lets us tile directly to the final requested layout.
+    SetTimer(ApplyQueuedLayoutCycle, -Config["layoutCycleDebounceMs"])
+}
+
+ApplyQueuedLayoutCycle(*) {
+    global LayoutCycleState, Manager
+    pendingCycles := LayoutCycleState.pendingCycles
+    pendingManager := LayoutCycleState.manager
+    LayoutCycleState.pendingCycles := 0
+    LayoutCycleState.manager := ""
+    if !pendingCycles || !IsObject(pendingManager)
+        return
+
+    previous := pendingManager.layout
+    pendingManager.layout := LayoutAfterCycles(previous, pendingCycles)
+    if (pendingManager.layout = previous) {
+        DebugLog("Layout cycle burst left layout unchanged; presses=" pendingCycles)
         return
     }
-}
+    pendingManager.lastLayoutState := ""
+    ScheduleLayoutStateSave()
+    DebugLog("Layout changed: " previous " -> " pendingManager.layout
+        "; coalesced presses=" pendingCycles)
 
-RefreshLayout(*) {
-    global Manager
-    if (Manager.layout = "floating")
+    ; A desktop may have changed while the burst was being collected. Preserve
+    ; its workspace state, but only disturb the currently visible workspace.
+    if (ObjPtr(Manager) != ObjPtr(pendingManager))
         return
-    try {
-        WithPerMonitorDpiAwareness((*) => RefreshLayoutPhysical())
-    } catch Error as err {
-        LogRefreshStatus("refresh error: " ErrorDescription(err))
-    }
-}
-
-RefreshLayoutPhysical() {
-    global Manager
-    area := GetActiveMonitorArea()
-    if !IsObject(area) {
-        LogRefreshStatus("no active monitor; active hwnd=" WinExist("A"))
-        return
-    }
-    windows := GetEligibleWindows(area)
-    SyncWindowOrder(windows)
-    selection := SelectTileableWindows(Manager.layout, Manager.order, area, Manager.gap)
-    Manager.order := selection.tiled
-    Manager.constraintFloats := selection.floating
-    LogConstraintSelection(selection)
-    LogRefreshStatus("monitor=" area.index
-        "; eligible=" windows.Length
-        "; tiled=" Manager.order.Length
-        "; constraint-floating=" Manager.constraintFloats.Length
-        "; top-level=" WinGetList().Length)
-    LogLayoutChange(area)
-    ApplyLayout(Manager.layout, Manager.order, area, Manager.gap, Manager.masterRatio)
-    CenterConstraintFloatingWindows(
-        Manager.constraintFloats, area, Manager.gap)
-    ; WinMove completes synchronously, so redraw against the new DWM frame
-    ; instead of waiting for the next focus or polling event.
-    UpdateFocusBorder()
-}
-
-LogConstraintSelection(selection) {
-    global Manager
-    status := ConstraintSelectionDescription(selection.floatingDetails)
-    if (status != Manager.lastConstraintStatus) {
-        DebugLog("Constraint decision: " status)
-        Manager.lastConstraintStatus := status
-    }
-}
-
-LogRefreshStatus(status) {
-    global Manager
-    if (status != Manager.lastRefreshStatus) {
-        DebugLog("Refresh: " status)
-        Manager.lastRefreshStatus := status
-    }
-}
-
-LogLayoutChange(area) {
-    global Manager
-    state := Manager.layout
-        . "|monitor=" area.index
-        . "|gap=" Manager.gap
-        . "|ratio=" Manager.masterRatio
-        . "|windows=" WindowListDescription(Manager.order)
-        . "|constraint-floating=" WindowListDescription(Manager.constraintFloats)
-    if (state != Manager.lastLayoutState) {
-        DebugLog("Reflow " state)
-        Manager.lastLayoutState := state
-    }
-}
-
-SyncWindowOrder(currentWindows) {
-    global Manager
-    current := Map()
-    for hwnd in currentWindows
-        current[hwnd] := true
-
-    ordered := []
-    for hwnd in Manager.order {
-        if current.Has(hwnd)
-            ordered.Push(hwnd)
-    }
-    for hwnd in currentWindows {
-        if !FindWindowIndex(ordered, hwnd)
-            ordered.Push(hwnd)
-    }
-    Manager.order := ordered
-}
-
-CycleLayout() {
-    global Manager
-    previous := Manager.layout
-    Manager.layout := (Manager.layout = "vertical") ? "horizontal"
-        : (Manager.layout = "horizontal") ? "maximized"
-        : (Manager.layout = "maximized") ? "floating" : "vertical"
-    Manager.lastLayoutState := ""
-    DebugLog("Layout changed: " previous " -> " Manager.layout)
     UpdateTrayTip()
     if !IsFocusBorderLayoutActive()
         HideFocusBorder("non-tiled-layout")
-    ShowLayoutNotification(Manager.layout)
+    ShowLayoutNotification(pendingManager.layout)
     RefreshLayout()
 }
 
@@ -364,7 +397,8 @@ ChangeGap(delta) {
     global Config, Manager
     if !IsTilingModeActive()
         return
-    Manager.gap := Max(Config["minGap"], Manager.gap + delta)
+    Manager.gap := ClampGap(Manager.gap + delta)
+    ScheduleLayoutStateSave()
     DebugLog("Gap changed to " Manager.gap)
     RefreshLayout()
 }
@@ -374,6 +408,7 @@ ChangeMasterRatio(delta) {
     if !IsTilingModeActive()
         return
     Manager.masterRatio := Min(Config["maxMasterRatio"], Max(Config["minMasterRatio"], Manager.masterRatio + delta))
+    ScheduleLayoutStateSave()
     DebugLog("Master ratio changed to " Manager.masterRatio)
     RefreshLayout()
 }

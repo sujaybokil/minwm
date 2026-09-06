@@ -7,6 +7,11 @@ ApplyLayout(layout, windows, area, gap, masterRatio) {
         return
     }
 
+    if (layout = "monocle") {
+        ApplyMonocle(windows, area, gap)
+        return
+    }
+
     if (windows.Length = 1) {
         MoveWindowToRect(windows[1], area.left + gap, area.top + gap,
             area.right - area.left - 2 * gap, area.bottom - area.top - 2 * gap)
@@ -17,6 +22,58 @@ ApplyLayout(layout, windows, area, gap, masterRatio) {
         ApplyVerticalMasterStack(windows, area, gap, masterRatio)
     else if (layout = "horizontal")
         ApplyHorizontalMasterStack(windows, area, gap, masterRatio)
+    else if (layout = "grid")
+        ApplyGrid(windows, area, gap)
+}
+
+ApplyMonocle(windows, area, gap) {
+    width := area.right - area.left - 2 * gap
+    height := area.bottom - area.top - 2 * gap
+    for hwnd in windows
+        MoveWindowToRect(hwnd, area.left + gap, area.top + gap, width, height)
+}
+
+ApplyGrid(windows, area, gap) {
+    count := windows.Length
+    columns := Ceil(Sqrt(count))
+    rows := Ceil(count / columns)
+    usableWidth := RectWidth(area) - 2 * gap - gap * (columns - 1)
+    usableHeight := RectHeight(area) - 2 * gap - gap * (rows - 1)
+    minimumWidths := []
+    minimumHeights := []
+    Loop columns
+        minimumWidths.Push(0)
+    Loop rows
+        minimumHeights.Push(0)
+    for index, hwnd in windows {
+        minimum := GetVisibleMinimumSize(hwnd)
+        column := Mod(index - 1, columns) + 1
+        row := Ceil(index / columns)
+        minimumWidths[column] := Max(minimumWidths[column], minimum.width)
+        minimumHeights[row] := Max(minimumHeights[row], minimum.height)
+    }
+    widths := AllocateConstrainedSizes(usableWidth, minimumWidths)
+    heights := AllocateConstrainedSizes(usableHeight, minimumHeights)
+    if !IsObject(widths) || !IsObject(heights)
+        return
+    xPositions := []
+    x := area.left + gap
+    for _, width in widths {
+        xPositions.Push(x)
+        x += width + gap
+    }
+    yPositions := []
+    y := area.top + gap
+    for _, height in heights {
+        yPositions.Push(y)
+        y += height + gap
+    }
+    for index, hwnd in windows {
+        column := Mod(index - 1, columns) + 1
+        row := Ceil(index / columns)
+        MoveWindowToRect(hwnd, xPositions[column], yPositions[row],
+            widths[column], heights[row])
+    }
 }
 
 MaximizeWindows(windows) {

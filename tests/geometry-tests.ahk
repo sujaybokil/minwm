@@ -76,6 +76,65 @@ RunGeometryTests() {
     if CalculateFocusBorderRects(
         RectFromXYWH(0, 0, 100, 100), 0).Length
         throw Error("zero-width focus border should be disabled")
+    AssertEqual(GetEffectiveLayoutGap(12, true, 1), 0,
+        "smart gaps should remove spacing for one tiled window")
+    AssertEqual(GetEffectiveLayoutGap(12, false, 1), 12,
+        "disabled smart gaps should retain one-window spacing")
+    AssertEqual(GetEffectiveLayoutGap(12, true, 2), 12,
+        "smart gaps should retain spacing for multiple tiled windows")
+
+    tiledRect := RectFromXYWH(100, 100, 800, 600)
+    if !IsFocusBorderOccludedInZOrder(101, tiledRect, [
+        {
+            hwnd: 202,
+            isFocusBorder: false,
+            visible: true,
+            minimized: false,
+            rect: RectFromXYWH(0, 0, 1920, 1080)
+        },
+        {
+            hwnd: 101,
+            isFocusBorder: false,
+            visible: true,
+            minimized: false,
+            rect: tiledRect
+        }
+    ])
+        throw Error("a fullscreen foreground window should hide a border for a tiled window behind it")
+    if IsFocusBorderOccludedInZOrder(101, tiledRect, [
+        {
+            hwnd: 101,
+            isFocusBorder: false,
+            visible: true,
+            minimized: false,
+            rect: tiledRect
+        },
+        {
+            hwnd: 202,
+            isFocusBorder: false,
+            visible: true,
+            minimized: false,
+            rect: RectFromXYWH(0, 0, 1920, 1080)
+        }
+    ])
+        throw Error("a window below the tiled target should not hide its focus border")
+    if IsFocusBorderOccludedInZOrder(101, tiledRect, [
+        {
+            hwnd: 202,
+            isFocusBorder: false,
+            visible: true,
+            minimized: false,
+            rect: RectFromXYWH(200, 200, 300, 300)
+        },
+        {
+            hwnd: 101,
+            isFocusBorder: false,
+            visible: true,
+            minimized: false,
+            rect: tiledRect
+        }
+    ], 202)
+        throw Error("the active browser menu should not hide its owner's focus border")
 
     normalWindowStyle := 0x16CF0000
     if HasDialogOrPopupSemantics(
@@ -93,6 +152,32 @@ RunGeometryTests() {
     if !HasDialogOrPopupSemantics(
         normalWindowStyle, 0, "#32770", 0)
         throw Error("standard dialog classes must be excluded")
+    if !CanFocusBorderFollowOwner("Chrome_WidgetWin_1", 0, 123)
+        throw Error("an owned browser menu should retain its owner's focus border")
+    if CanFocusBorderFollowOwner("#32770", 0, 123)
+        throw Error("a standard dialog must not retain its owner's focus border")
+    if CanFocusBorderFollowOwner("CustomDialog", 0x1, 123)
+        throw Error("a modal dialog must not retain its owner's focus border")
+    if CanFocusBorderFollowOwner("Chrome_WidgetWin_1", 0, 0)
+        throw Error("an unowned popup must not retain a focus border")
+
+    persistedState := { layout: "vertical", gap: 12, masterRatio: 0.58 }
+    ApplyPersistedWorkspaceSettings(persistedState, " GRID ", "20", "0.62")
+    AssertEqual(persistedState.layout, "grid",
+        "persisted layout names should be normalized before use")
+    AssertEqual(persistedState.gap, 20,
+        "persisted gaps within the supported range should be restored")
+    AssertEqual(persistedState.masterRatio, 0.62,
+        "persisted master ratios within configured limits should be restored")
+    ApplyPersistedWorkspaceSettings(persistedState, "invalid", "1001", "1.0")
+    AssertEqual(persistedState.layout, "grid",
+        "invalid persisted layouts should leave the safe state unchanged")
+    AssertEqual(persistedState.gap, 20,
+        "out-of-range persisted gaps should leave the safe state unchanged")
+    AssertEqual(persistedState.masterRatio, 0.62,
+        "out-of-range persisted master ratios should leave the safe state unchanged")
+    AssertEqual(ClampGap(1500), 1000,
+        "gap adjustments should respect the persisted-state upper bound")
     if !IsWindowsStartMenuOrSearch("StartMenuExperienceHost.exe")
         throw Error("Windows Start menu host should be excluded")
     if !IsWindowsStartMenuOrSearch("SearchHost.exe")
@@ -111,6 +196,15 @@ RunGeometryTests() {
         { left: 8, top: 10, right: 110, bottom: 110 },
         { left: 10, top: 10, right: 110, bottom: 110 })
         throw Error("differences over one pixel should not match")
+
+    if !RectsOverlap(
+        RectFromXYWH(10, 10, 100, 100),
+        RectFromXYWH(80, 80, 100, 100))
+        throw Error("intersecting rectangles should overlap")
+    if RectsOverlap(
+        RectFromXYWH(10, 10, 100, 100),
+        RectFromXYWH(110, 10, 100, 100))
+        throw Error("edge-touching rectangles should not overlap")
 
     if (ConstrainSplitSize(1000, 580, 200, 500) != 500)
         throw Error("split should reserve the second window's minimum")
@@ -152,6 +246,14 @@ RunGeometryTests() {
     horizontalSizes.Push({ width: 900, height: 400 })
     if CanTileMinimumSizes("horizontal", horizontalSizes, 2524, 1504, 12)
         throw Error("horizontal layout should reject excessive stack widths")
+
+    if !CanTileMinimumSizes("grid", [
+        { width: 500, height: 400 },
+        { width: 500, height: 400 },
+        { width: 500, height: 400 },
+        { width: 500, height: 400 }
+    ], 1200, 1000, 12)
+        throw Error("grid layout should allocate constrained rows and columns")
 
     if (FindLargestMinimumSizeIndex([
         { width: 700, height: 500 },
@@ -208,7 +310,7 @@ RunGeometryTests() {
 }
 
 RunWorkspaceStateTests() {
-    global Config, Manager
+    global Config, Manager, VirtualDesktops
     InitializeWorkspaceStateStore()
     first := CreateWorkspaceManagerState()
     AssertEqual(first.layout, Config["defaultLayout"],
@@ -216,13 +318,19 @@ RunWorkspaceStateTests() {
     if (first.order.Length || first.constraintFloats.Length)
         throw Error("new workspaces should begin without windows")
 
+    VirtualDesktops.enabled := true
+    VirtualDesktops.desktopIds := ["desktop-a", "desktop-b"]
+    Config["desktop1Layout"] := "grid"
+    Config["desktop2Layout"] := "monocle"
     if !ActivateWorkspace("desktop-a")
         throw Error("a desktop id should activate a workspace")
+    AssertEqual(Manager.layout, "grid",
+        "desktop one should use its configured initial layout")
     Manager.layout := "horizontal"
     Manager.order := [101, 202]
     ActivateWorkspace("desktop-b")
-    AssertEqual(Manager.layout, Config["defaultLayout"],
-        "each desktop should start with independent layout state")
+    AssertEqual(Manager.layout, "monocle",
+        "each desktop should use its configured initial layout")
     ActivateWorkspace("desktop-a")
     AssertEqual(Manager.layout, "horizontal",
         "returning to a desktop should restore its layout state")
@@ -232,8 +340,10 @@ RunWorkspaceStateTests() {
         throw Error("an empty desktop id should not activate a workspace")
     PruneWorkspaceStates(["desktop-b"])
     ActivateWorkspace("desktop-a")
-    AssertEqual(Manager.layout, Config["defaultLayout"],
-        "pruned workspaces should be recreated with default state")
+    AssertEqual(Manager.layout, "grid",
+        "pruned workspaces should be recreated with their desktop default")
+    VirtualDesktops.enabled := false
+    VirtualDesktops.desktopIds := []
 }
 
 RunVirtualDesktopHelperTests() {
@@ -250,6 +360,8 @@ RunVirtualDesktopHelperTests() {
         "desktop ids should honor their buffer offset")
     AssertEqual(VirtualDesktopIdFromBuffer(firstId secondId, 16), secondId,
         "hexadecimal desktop ids should honor their byte offset")
+    AssertEqual(VirtualDesktopIdFromBuffer(VirtualDesktopIdToBuffer(firstId)), firstId,
+        "virtual desktop ids should round-trip through COM GUID buffers")
     idsFromRegistryString := []
     registryText := firstId secondId
     Loop StrLen(registryText) // 32
@@ -278,9 +390,37 @@ RunVirtualDesktopHelperTests() {
         throw Error("direct switcher should accept its zero-based destination exit code")
     if IsVirtualDesktopSwitchExitSuccessful(0, 6)
         throw Error("direct switcher should reject an unexpected destination exit code")
+
+    candidates := BuildVirtualDesktopFocusCandidates(303, 202, [202, 101, 303])
+    AssertEqual(candidates.Length, 3,
+        "virtual desktop focus candidates should de-duplicate priorities")
+    AssertEqual(candidates[1], 303,
+        "a moved window should be focused before remembered workspace windows")
+    AssertEqual(candidates[2], 202,
+        "a remembered window should be focused before workspace order")
+    AssertEqual(candidates[3], 101,
+        "workspace order should remain the fallback after remembered focus")
+    candidates := BuildVirtualDesktopFocusCandidates(0, 0, [])
+    AssertEqual(candidates.Length, 0,
+        "an empty or floating-only workspace should have no application focus candidate")
+
+    InitializeVirtualDesktopState()
+    VirtualDesktops.currentId := firstId
+    if !RememberVirtualDesktopFocus(404)
+        throw Error("a current workspace should remember its focused window")
+    AssertEqual(VirtualDesktops.lastFocusByDesktopId[firstId], 404,
+        "virtual desktop focus memory should be keyed by desktop id")
+    if RememberVirtualDesktopFocus(0)
+        throw Error("an empty window handle should not be remembered")
 }
 
 RunPresentationAndCustomHotkeyTests() {
+    AssertEqual(LayoutAfterCycles("vertical", 1), "horizontal",
+        "one layout cycle should select horizontal")
+    AssertEqual(LayoutAfterCycles("vertical", 3), "monocle",
+        "a coalesced burst should select its final layout")
+    AssertEqual(LayoutAfterCycles("horizontal", 6), "horizontal",
+        "a complete layout cycle should preserve the starting layout")
     AssertEqual(LayoutNotificationLabel("vertical"), "Vertical master-stack",
         "vertical layout notification label")
     AssertEqual(LayoutNotificationLabel("horizontal"), "Horizontal master-stack",
@@ -302,10 +442,30 @@ RunPresentationAndCustomHotkeyTests() {
         . "C:\\minwm\\config\\custom-hotkeys.ahk" Chr(34)
     if !InStr(wrapper, includeLine)
         throw Error("custom-hotkey wrapper should include the user script")
+
+    rule := Map("process", "notepad.exe", "initialState", "floating")
+    if !WindowRuleMatches(rule, {
+        process: "NOTEPAD.EXE", class: "Notepad", title: "Untitled"
+    })
+        throw Error("window rule process matching should be case-insensitive")
+    if WindowRuleMatches(rule, {
+        process: "calc.exe", class: "ApplicationFrameWindow", title: "Calculator"
+    })
+        throw Error("window rule matching should reject different processes")
+    if !StringSetHas(Map("Notepad.EXE", true), "notepad.exe")
+        throw Error("configurable process lists should match case-insensitively")
 }
 
 RunConfigValidationTests() {
     global Config, ConfigLoadMessages
+    AssertEqual(Config["virtualDesktopCount"], 6,
+        "virtual desktop count should default to six")
+    AssertEqual(Config["hotkeys"]["toggleDesktopIndicator"], "#d",
+        "desktop indicator toggle should have a default hotkey")
+    AssertEqual(Config["hotkeys"]["focusLeft"], "#!Left",
+        "directional focus should have a default hotkey")
+    AssertEqual(Config["desktopIndicatorX"], 8,
+        "desktop indicator should have an eight-pixel default X offset")
     Config["defaultLayout"] := " HORIZONTAL "
     ValidateConfig()
     AssertEqual(Config["defaultLayout"], "horizontal",
@@ -316,6 +476,10 @@ RunConfigValidationTests() {
         "invalid default layouts should fall back safely")
     if !InStr(ConfigLoadMessages[ConfigLoadMessages.Length], "defaultLayout")
         throw Error("invalid default layouts should produce a configuration message")
+    Config["desktop9Layout"] := "diagonal"
+    ValidateConfig()
+    AssertEqual(Config["desktop9Layout"], "vertical",
+        "invalid per-desktop layouts should fall back safely")
     Config["virtualDesktopsEnabled"] := false
     ValidateConfig()
     if Config["virtualDesktopsEnabled"]
@@ -324,4 +488,20 @@ RunConfigValidationTests() {
     ValidateConfig()
     if !Config["virtualDesktopsEnabled"]
         throw Error("invalid workspace settings should default to enabled")
+    Config["virtualDesktopCount"] := 9
+    ValidateConfig()
+    AssertEqual(Config["virtualDesktopCount"], 9,
+        "virtual desktop count should accept every direct workspace selector")
+    Config["virtualDesktopCount"] := 10
+    ValidateConfig()
+    AssertEqual(Config["virtualDesktopCount"], 6,
+        "virtual desktop count above the selector range should fall back safely")
+    Config["startupVirtualDesktop"] := 7
+    ValidateConfig()
+    AssertEqual(Config["startupVirtualDesktop"], 1,
+        "startup desktop beyond the configured desktop count should fall back safely")
+    Config["desktopIndicatorWidth"] := 0
+    ValidateConfig()
+    AssertEqual(Config["desktopIndicatorWidth"], 44,
+        "invalid desktop indicator dimensions should fall back safely")
 }
