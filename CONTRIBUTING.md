@@ -6,7 +6,7 @@ welcome.
 ## Before opening an issue
 
 1. Reproduce the problem with the latest `main` branch.
-2. Run minwm with `--debug true`.
+2. Run minwm with `--log-path "D:\logs\minwm-investigation.log"`.
 3. Reduce the log to the relevant lines and remove anything you do not want to
    share publicly.
 4. Include your Windows version, monitor scaling, application version, layout,
@@ -22,7 +22,7 @@ see [SECURITY.md](SECURITY.md).
 - Add pure unit tests for geometry or constraint changes.
 - Keep debug logs actionable and avoid window titles or user content.
 - Do not commit generated files under `dist\` or third-party runtimes.
-- Run `.\tools\Test.ps1` before submitting.
+- Run `.\tools\tests.ps1` before submitting.
 
 By contributing, you agree that your contribution is licensed under the MIT
 License.

@@ -34,7 +34,7 @@ StartFocusBorder() {
         ; Location-change events provide immediate updates while dragging.
         ; This short polling fallback covers applications which do not emit
         ; them consistently during live resize.
-        SetTimer(UpdateFocusBorder, 33)
+        SetTimer(UpdateFocusBorder, Config["focusBorderPollInterval"])
         UpdateFocusBorder()
         DebugLog("Focus border started; width=" Config["focusBorderWidth"]
             "; color=#" Config["focusBorderColor"])
@@ -172,14 +172,18 @@ UpdateFocusBorder(*) {
         return
     }
 
-    hwnd := WinExist("A")
-    if !hwnd || !IsHighlightableWindow(hwnd) {
+    ; Read the foreground HWND directly. Some fullscreen, game, and remote-app
+    ; windows can make AutoHotkey's active-window lookup lag behind the actual
+    ; foreground transition, leaving a border over the previous tiled window.
+    foregroundHwnd := DllCall("User32\GetForegroundWindow", "ptr")
+    hwnd := GetFocusBorderTarget(foregroundHwnd)
+    if !hwnd {
         HideFocusBorder("hidden")
         return
     }
 
     try WithPerMonitorDpiAwareness(
-        (*) => PositionFocusBorderPhysical(hwnd))
+        (*) => PositionFocusBorderPhysical(hwnd, foregroundHwnd))
     catch Error as err {
         HideFocusBorder("error")
         DebugLog("Focus border update failed for hwnd=" hwnd ": "
@@ -201,16 +205,61 @@ IsHighlightableWindow(hwnd) {
     }
 }
 
-IsFocusBorderLayoutActive() {
-    global Manager
-    ; Maximized windows already have a clear system frame; only the split
-    ; tiling layouts need an additional focus indicator.
-    return Manager.layout = "vertical" || Manager.layout = "horizontal"
+GetFocusBorderTarget(foregroundHwnd) {
+    ; Chromium-based browsers use a small owned popup for some context and
+    ; dropdown menus. Windows makes that popup foreground, but it is still
+    ; part of the browser interaction rather than a new tiled target. Keep the
+    ; border on its eligible owner until the popup closes.
+    if !foregroundHwnd
+        return 0
+    if IsHighlightableWindow(foregroundHwnd)
+        return foregroundHwnd
+    try {
+        title := "ahk_id " foregroundHwnd
+        className := WinGetClass(title)
+        exStyle := WinGetExStyle(title)
+        ownerHwnd := DllCall(
+            "User32\GetWindow", "ptr", foregroundHwnd, "uint", 4, "ptr") ; GW_OWNER
+        if !CanFocusBorderFollowOwner(className, exStyle, ownerHwnd)
+            return 0
+        return IsHighlightableWindow(ownerHwnd) ? ownerHwnd : 0
+    } catch {
+        return 0
+    }
 }
 
-PositionFocusBorderPhysical(hwnd) {
+CanFocusBorderFollowOwner(className, exStyle, ownerHwnd) {
+    ; Do not retain the border for genuine dialogs. Menu-like popups, including
+    ; Chromium's owned menu windows, have neither dialog marker.
+    static WS_EX_DLGMODALFRAME := 0x00000001
+    return ownerHwnd
+        && className != "#32770"
+        && !(exStyle & WS_EX_DLGMODALFRAME)
+}
+
+IsFocusBorderLayoutActive() {
+    global Config, Manager
+    return LayoutListContains(Config["focusBorderLayouts"], Manager.layout)
+}
+
+LayoutListContains(layouts, candidate) {
+    for _, layout in layouts {
+        if (layout = candidate)
+            return true
+    }
+    return false
+}
+
+PositionFocusBorderPhysical(hwnd, foregroundHwnd := 0) {
     global Config, FocusBorder
     rect := GetVisibleWindowRect(hwnd)
+    ; The edges live in the topmost band so they remain visible above their
+    ; tiled target.  Do not let them leak through a different window which is
+    ; already above that target in the normal z-order.
+    if IsFocusBorderOccluded(hwnd, rect, foregroundHwnd) {
+        HideFocusBorder("occluded")
+        return
+    }
     edgeRects := CalculateFocusBorderRects(
         rect, Config["focusBorderWidth"])
     if (edgeRects.Length != FocusBorder.edges.Length) {
@@ -218,15 +267,68 @@ PositionFocusBorderPhysical(hwnd) {
         return
     }
 
+    state := hwnd "|" RectDescription(rect)
+    ; The timer is a fallback for applications that omit location events. Do
+    ; not force four topmost frame changes on every tick when the target and
+    ; its visible bounds did not change: Chromium/Electron applications emit
+    ; enough incidental UI activity for that to visibly flicker the border.
+    if (state = FocusBorder.lastState)
+        return
+
     for index, edgeRect in edgeRects
         SetFocusBorderEdgeRect(FocusBorder.edges[index].Hwnd, edgeRect)
 
-    state := hwnd "|" RectDescription(rect)
-    if (state != FocusBorder.lastState) {
-        DebugLog("Focus border target hwnd=" hwnd
-            "; visible=" RectDescription(rect))
-        FocusBorder.lastState := state
+    DebugLog("Focus border target hwnd=" hwnd
+        "; visible=" RectDescription(rect))
+    FocusBorder.lastState := state
+}
+
+IsFocusBorderOccluded(targetHwnd, targetRect, ignoredHwnd := 0) {
+    global FocusBorder
+    return IsFocusBorderOccludedInZOrder(
+        targetHwnd, targetRect, BuildFocusBorderZOrderSnapshot(), ignoredHwnd)
+}
+
+BuildFocusBorderZOrderSnapshot() {
+    global FocusBorder
+    windows := []
+    for _, hwnd in WinGetList() {
+        try {
+            windows.Push({
+                hwnd: hwnd,
+                isFocusBorder: IsFocusBorderEdge(hwnd),
+                visible: DllCall("User32\IsWindowVisible", "ptr", hwnd, "int") != 0,
+                minimized: WinGetMinMax("ahk_id " hwnd) = -1,
+                rect: GetVisibleWindowRect(hwnd)
+            })
+        } catch {
+        }
     }
+    return windows
+}
+
+IsFocusBorderOccludedInZOrder(targetHwnd, targetRect, windows, ignoredHwnd := 0) {
+    ; The snapshot is ordered top-to-bottom. A fullscreen or topmost app can
+    ; be in a different z-order band, so inspect every visible window before
+    ; the target rather than assuming it shares minwm's normal window order.
+    for _, window in windows {
+        if (window.hwnd = targetHwnd)
+            return false
+        if (window.hwnd = ignoredHwnd) || window.isFocusBorder || !window.visible || window.minimized
+            continue
+        if RectsOverlap(targetRect, window.rect)
+            return true
+    }
+    return false
+}
+
+IsFocusBorderEdge(hwnd) {
+    global FocusBorder
+    for _, edge in FocusBorder.edges {
+        if (edge.Hwnd = hwnd)
+            return true
+    }
+    return false
 }
 
 SetFocusBorderEdgeRect(hwnd, rect) {

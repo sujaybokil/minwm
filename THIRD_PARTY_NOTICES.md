@@ -30,7 +30,7 @@ minwm fully usable with Windows keyboard shortcut switching.
 - License: MIT, Copyright (c) 2017 Markus Scholtes
 
 The generated installer executables are pinned and verified by
-`tools\Prepare-Dependencies.ps1`:
+`tools\prepare-dependencies.ps1`:
 
 - `VirtualDesktop11.exe`: `F6532DB79F6F0E4018CE77F08805D3FD3F7BB076CBFBAC0AC8189FE5376D9E82`
 - `VirtualDesktop11-24H2.exe`: `8334B529D19E71662950821C91ED996A0E92DF41C8D0A077E95151AA7041CB35`

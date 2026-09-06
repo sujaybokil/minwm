@@ -1,0 +1,138 @@
+# minwm default configuration.
+#
+# This file ships with minwm and is replaced on upgrade. To customize minwm,
+# create %APPDATA%\minwm\config.toml and add only the settings you want to
+# override. Restart minwm after changing either file.
+# Hotkeys use AutoHotkey v2 notation: # = Win, + = Shift.
+
+# Windows smaller than either dimension are ignored by tiling.
+minWidth = 320
+minHeight = 220
+
+# The manager checks for window changes at this interval, in milliseconds.
+pollInterval = 400
+# Reflow shortly after window create, close, visibility, or focus changes.
+# pollInterval remains a fallback for applications that do not emit events.
+windowRefreshEventDebounceMs = 50
+
+defaultGap = 12
+gapStep = 4
+minGap = 0
+# Remove all outer and inner gaps while exactly one window is tiled. Win+Y
+# toggles this behavior for the current workspace and monitor.
+smartGapsEnabled = true
+
+# Initial layout for each monitor: vertical, horizontal, grid, monocle,
+# maximized, or floating. layoutCycle controls the order used by cycleLayout.
+defaultLayout = "vertical"
+# Initial layout for each virtual desktop. Set only the entries you want in
+# %APPDATA%\minwm\config.toml; unspecified entries retain these defaults.
+# These are applied when a desktop/monitor workspace is first created. Later
+# layout changes are independent and are restored from persisted state.
+desktop1Layout = "vertical"
+desktop2Layout = "vertical"
+desktop3Layout = "vertical"
+desktop4Layout = "vertical"
+desktop5Layout = "vertical"
+desktop6Layout = "vertical"
+desktop7Layout = "vertical"
+desktop8Layout = "vertical"
+desktop9Layout = "vertical"
+layoutCycle = ["vertical", "horizontal", "grid", "monocle", "maximized", "floating"]
+layoutCycleDebounceMs = 120
+layoutNotificationsEnabled = true
+layoutNotificationDurationMs = 1000
+layoutStateSaveDebounceMs = 250
+
+# Manage the configured number of Windows virtual-desktop workspaces and enable
+# matching Win+number / Win+Shift+number selectors. Supported range: 1 through 9.
+virtualDesktopsEnabled = true
+virtualDesktopCount = 6
+# Desktop to select when minwm starts. Must be within virtualDesktopCount.
+startupVirtualDesktop = 1
+# How frequently minwm observes externally initiated desktop changes.
+virtualDesktopPollInterval = 50
+
+# Virtual-desktop indicator position is offset from the primary monitor's
+# bottom-left corner. Dimensions and offsets are in pixels; opacity is 0–255.
+desktopIndicatorX = 8
+desktopIndicatorY = 12
+desktopIndicatorWidth = 44
+desktopIndicatorHeight = 22
+desktopIndicatorBackgroundColor = "202020"
+desktopIndicatorTextColor = "FFFFFF"
+desktopIndicatorOpacity = 185
+desktopIndicatorFontSize = 11
+desktopIndicatorFontName = "Segoe UI Semibold"
+desktopIndicatorPollInterval = 1000
+
+# The first tiled window is the master. The remaining windows form the stack.
+masterRatio = 0.58
+masterRatioStep = 0.04
+minMasterRatio = 0.30
+maxMasterRatio = 0.75
+
+# Session logs default to %TEMP%\minwm.log. A relative logPath
+# in the user configuration is resolved within %APPDATA%\minwm.
+logPath = "%TEMP%\minwm.log"
+debugMaxSizeMb = 5
+
+# Focused-window border. Set width to 0 to disable it. focusBorderLayouts
+# accepts any supported layouts and can be [] to suppress the border entirely.
+focusBorderWidth = 1
+focusBorderColor = "FFFFFF"
+focusBorderLayouts = ["vertical", "horizontal"]
+focusBorderPollInterval = 33
+
+# Classes that must never be tiled. Use one line; only quoted strings are supported.
+excludedClasses = ["Progman", "WorkerW", "Shell_TrayWnd", "#32770"]
+
+# Exact process names to ignore, plus classes/processes/titles that should
+# always float. These are case-sensitive in TOML but matched case-insensitively
+# by minwm on Windows.
+ignoredProcesses = ["StartMenuExperienceHost.exe", "SearchHost.exe", "SearchApp.exe", "SearchUI.exe"]
+floatingClasses = []
+floatingProcesses = []
+floatingTitles = []
+
+# Set false to prevent %APPDATA%\minwm\custom-hotkeys.ahk from launching.
+customHotkeysEnabled = true
+
+[hotkeys]
+cycleLayout = "#t"
+retile = "#r"
+increaseGap = "#]"
+decreaseGap = "#["
+increaseMaster = "#+]"
+decreaseMaster = "#+["
+focusNext = "#j"
+focusPrevious = "#k"
+focusLeft = "#!Left"
+focusRight = "#!Right"
+focusUp = "#!Up"
+focusDown = "#!Down"
+moveNext = "#+j"
+movePrevious = "#+k"
+moveLeft = "#!+Left"
+moveRight = "#!+Right"
+moveUp = "#!+Up"
+moveDown = "#!+Down"
+swapMaster = "#m"
+closeWindow = "#w"
+# Temporarily float/tile the focused eligible window. This is session-only.
+toggleTemporaryFloat = "#f"
+# Alt+S stores or hides/shows the current workspace's session-only scratchpad.
+# Alt+T returns that scratchpad window to tiling.
+toggleScratchpad = "!s"
+restoreScratchpad = "!t"
+toggleSmartGaps = "#y"
+showHotkeys = "#h"
+# Toggle the virtual-desktop indicator at the bottom-left of the taskbar.
+toggleDesktopIndicator = "#d"
+
+# First matching rule wins. Match fields are case-insensitive exact strings.
+# initialState is tile, floating, or ignore; desktop is 1 through
+# virtualDesktopCount; monitor is primary or a one-based monitor index.
+# [[windowRules]]
+# process = "notepad.exe"
+# initialState = "floating"

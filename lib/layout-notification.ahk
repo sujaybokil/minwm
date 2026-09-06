@@ -4,9 +4,12 @@ InitializeLayoutNotificationState() {
 }
 
 ShowLayoutNotification(layout) {
+    global Config
+    if !Config["layoutNotificationsEnabled"]
+        return
     try {
         TrayTip(LayoutNotificationLabel(layout), "minwm layout", 1)
-        SetTimer(HideLayoutNotification, -1000)
+        SetTimer(HideLayoutNotification, -Config["layoutNotificationDurationMs"])
     } catch Error as err {
         DebugLog("Layout notification failed: " ErrorDescription(err))
     }
@@ -28,5 +31,9 @@ LayoutNotificationLabel(layout) {
         return "Horizontal master-stack"
     if (layout = "maximized")
         return "Maximized"
+    if (layout = "grid")
+        return "Grid"
+    if (layout = "monocle")
+        return "Monocle"
     return "Floating — tiling disabled"
 }

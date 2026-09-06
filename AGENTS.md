@@ -2,7 +2,7 @@
 
 ## Test and build workflow
 
-- `tools\Test.ps1` runs the AutoHotkey source test entry points with the
+- `tools\tests.ps1` runs the AutoHotkey source test entry points with the
   installed AutoHotkey v2 interpreter. It does **not** run or inspect the
   generated installer executable.
 - `minwm-check.ahk` is a module/configuration smoke test. It initializes state
@@ -14,12 +14,12 @@
   as a standalone test entry point. AutoHotkey resolves `#Include` paths during
   launch in a way that made the former nested entry point block on missing
   include files.
-- Use `tools\Probe-AutoHotkeyTest.ps1 -ScriptPath <path>` to run one AHK entry
+- Use `tools\probe-autohotkey-test.ps1 -ScriptPath <path>` to run one AHK entry
   point with captured stdout/stderr and a timeout. Its `-ValidateOnly` option
   checks that AutoHotkey can load the script without executing it.
 - `tools\installer.ps1` runs the test suite before compiling
   `dist\minwm-setup.exe` with Inno Setup. It calls
-  `tools\Prepare-Dependencies.ps1` to download and SHA-256 verify the optional
+  `tools\prepare-dependencies.ps1` to download and SHA-256 verify the optional
   VirtualDesktop release files in the ignored `dependencies\` directory. This
   is the end-to-end source-test and installer-build command.
 - `minwm-virtual-desktop-probe.ahk` is the reversible integration probe for the
@@ -33,7 +33,8 @@
 - `minwm.ahk` is the production entry point and controller. It initializes
   services, registers built-in hotkeys and tray actions, owns the active
   `Manager` workspace state, and coordinates refresh/focus/reordering.
-- `config.ahk` supplies defaults and parses `config\config.toml`.
+- `config.ahk` supplies defaults from `config\default-config.toml` and merges
+  sparse user overrides from `%APPDATA%\minwm\config.toml`.
   `lib\config-validation.ahk` normalizes and validates those values. Update
   both when adding a configuration setting.
 - `lib\windows.ahk` contains Win32/DWM window geometry, minimum-size queries,
@@ -95,7 +96,7 @@
   its always-on-top edge windows can remain visibly drawn over a window on the
   desktop that has just been left. The foreground hook redraws it only after a
   destination window becomes active.
-  `tools\Prepare-Dependencies.ps1` verifies both pinned SHA-256 hashes before
+  `tools\prepare-dependencies.ps1` verifies both pinned SHA-256 hashes before
   creating an installer; keep the hash, `THIRD_PARTY_NOTICES.md`, installer
   file entries, and the generated `dependencies\virtualdesktop` contents in
   sync on upgrade. The dependency binaries must remain ignored and must never
@@ -135,6 +136,7 @@
 ## Current test environment
 
 - The repository requires AutoHotkey v2 at least as new as `AUTOHOTKEY_VERSION`
-  and below v3. The current local validation used AutoHotkey 2.0.26.
-- The manager does not need to be running for smoke tests, unit tests, or the
-  installer build.
+  and below v3. The current local validation used AutoHotkey 2.0.27.
+- `tools\tests.ps1` includes a reversible production-manager integration test.
+  It refuses to run while any AutoHotkey process is active, then starts minwm
+  with isolated configuration and desktop-changing features disabled.

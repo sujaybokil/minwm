@@ -13,8 +13,9 @@ WithPerMonitorDpiAwareness(callback) {
 }
 
 InitializeWindowsState() {
-    global WindowMinimumSizeCache
+    global WindowMinimumSizeCache, WindowRuleApplied
     WindowMinimumSizeCache := Map()
+    WindowRuleApplied := Map()
 }
 
 GetRawWindowRect(hwnd) {
@@ -144,21 +145,103 @@ GetPrimaryMonitorArea() {
     return { index: index, left: left, top: top, right: right, bottom: bottom }
 }
 
+GetMonitorAreas() {
+    areas := []
+    Loop MonitorGetCount() {
+        MonitorGetWorkArea(A_Index, &left, &top, &right, &bottom)
+        areas.Push({ index: A_Index, left: left, top: top, right: right, bottom: bottom })
+    }
+    return areas
+}
+
+GetAdjacentMonitorArea(area, direction) {
+    best := ""
+    bestScore := ""
+    centerX := area.left + RectWidth(area) / 2
+    centerY := area.top + RectHeight(area) / 2
+    for _, candidate in GetMonitorAreas() {
+        if (candidate.index = area.index)
+            continue
+        candidateX := candidate.left + RectWidth(candidate) / 2
+        candidateY := candidate.top + RectHeight(candidate) / 2
+        dx := candidateX - centerX
+        dy := candidateY - centerY
+        if ((direction = "left" && dx >= 0)
+            || (direction = "right" && dx <= 0)
+            || (direction = "up" && dy >= 0)
+            || (direction = "down" && dy <= 0))
+            continue
+        primary := (direction = "left" || direction = "right") ? Abs(dx) : Abs(dy)
+        secondary := (direction = "left" || direction = "right") ? Abs(dy) : Abs(dx)
+        score := primary * 100000 + secondary
+        if !IsObject(best) || score < bestScore {
+            best := candidate
+            bestScore := score
+        }
+    }
+    return best
+}
+
 GetEligibleWindows(area) {
     windows := []
     for hwnd in WinGetList() {
-        if (IsEligibleWindow(hwnd) && IsWindowOnCurrentVirtualDesktop(hwnd)
-            && IsWindowOnArea(hwnd, area))
+        if !IsEligibleWindow(hwnd)
+            continue
+        ApplyWindowRulePlacement(hwnd)
+        if (IsWindowOnCurrentVirtualDesktop(hwnd) && IsWindowOnArea(hwnd, area))
             windows.Push(hwnd)
     }
     PruneWindowMinimumSizeCache(windows)
     return windows
 }
 
+ApplyWindowRulePlacement(hwnd) {
+    global WindowRuleApplied, VirtualDesktops
+    if WindowRuleApplied.Has(hwnd)
+        return
+    rule := GetMatchingWindowRule(hwnd)
+    if !IsObject(rule) {
+        WindowRuleApplied[hwnd] := true
+        return
+    }
+    try {
+        if rule.Has("desktop") && VirtualDesktops.enabled {
+            targetIndex := rule["desktop"]
+            if (targetIndex <= VirtualDesktops.desktopIds.Length)
+                MoveWindowToVirtualDesktop(hwnd, VirtualDesktops.desktopIds[targetIndex])
+        }
+        if rule.Has("monitor") {
+            targetIndex := (rule["monitor"] = "primary") ? MonitorGetPrimary() : rule["monitor"]
+            if (targetIndex >= 1 && targetIndex <= MonitorGetCount()) {
+                MonitorGetWorkArea(targetIndex, &left, &top, &right, &bottom)
+                MoveWindowToRect(hwnd, left, top, Max(1, right - left), Max(1, bottom - top))
+            }
+        }
+        WindowRuleApplied[hwnd] := true
+    } catch Error as err {
+        DebugLog("Window rule placement failed for hwnd=" hwnd ": " ErrorDescription(err))
+    }
+}
+
 IsEligibleWindow(hwnd) {
     global Config
     title := "ahk_id " hwnd
 
+    try {
+        if !IsFocusableWindow(hwnd)
+            return false
+        if !(WinGetStyle(title) & 0x40000) ; WS_THICKFRAME: tiling needs a resizable frame.
+            return false
+        rect := GetVisibleWindowRect(hwnd)
+        return RectWidth(rect) >= Config["minWidth"] && RectHeight(rect) >= Config["minHeight"]
+    } catch {
+        return false
+    }
+}
+
+IsFocusableWindow(hwnd) {
+    global Config
+    title := "ahk_id " hwnd
     try {
         if !DllCall("IsWindowVisible", "ptr", hwnd, "int")
             return false
@@ -170,21 +253,16 @@ IsEligibleWindow(hwnd) {
         if !(style & 0x10000000) ; WS_VISIBLE
             return false
         className := WinGetClass(title)
-        if IsWindowsStartMenuOrSearch(WinGetProcessName(title))
+        if IsWindowIgnoredByConfig(WinGetProcessName(title))
             return false
         ownerHwnd := DllCall(
             "User32\GetWindow", "ptr", hwnd, "uint", 4, "ptr") ; GW_OWNER
         if HasDialogOrPopupSemantics(
             style, exStyle, className, ownerHwnd)
             return false
-        if !(style & 0x40000) ; WS_THICKFRAME: filters most dialogs and fixed popups.
-            return false
-
         if Config["excludedClasses"].Has(className)
             return false
-
-        rect := GetVisibleWindowRect(hwnd)
-        return RectWidth(rect) >= Config["minWidth"] && RectHeight(rect) >= Config["minHeight"]
+        return !IsWindowIgnoredByRule(hwnd)
     } catch {
         return false
     }

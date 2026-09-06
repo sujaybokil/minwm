@@ -21,6 +21,11 @@ RectsMatch(first, second, tolerance := 1) {
         && Abs(first.bottom - second.bottom) <= tolerance
 }
 
+RectsOverlap(first, second) {
+    return first.left < second.right && first.right > second.left
+        && first.top < second.bottom && first.bottom > second.top
+}
+
 GetInvisibleFrameMargins(raw, visible) {
     return {
         left: visible.left - raw.left,

@@ -84,6 +84,26 @@ CanTileMinimumSizes(layout, minimums, usableWidth, usableHeight, gap) {
             && master.width <= usableWidth
             && stackWidth <= usableWidth - gap * (stackCount - 1)
     }
+    if (layout = "grid") {
+        columns := Ceil(Sqrt(count))
+        rows := Ceil(count / columns)
+        widthMinimums := []
+        heightMinimums := []
+        Loop columns
+            widthMinimums.Push(0)
+        Loop rows
+            heightMinimums.Push(0)
+        for index, minimum in minimums {
+            column := Mod(index - 1, columns) + 1
+            row := Ceil(index / columns)
+            widthMinimums[column] := Max(widthMinimums[column], minimum.width)
+            heightMinimums[row] := Max(heightMinimums[row], minimum.height)
+        }
+        return IsObject(AllocateConstrainedSizes(
+            usableWidth - gap * (columns - 1), widthMinimums))
+            && IsObject(AllocateConstrainedSizes(
+                usableHeight - gap * (rows - 1), heightMinimums))
+    }
     return true
 }
 

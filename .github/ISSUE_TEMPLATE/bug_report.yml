@@ -46,5 +46,5 @@ body:
     id: logs
     attributes:
       label: Relevant debug log
-      description: Enable `--debug true`; remove unrelated or sensitive lines.
+      description: Launch with `--log-path "D:\logs\minwm-investigation.log"`; remove unrelated or sensitive lines.
       render: text

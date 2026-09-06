@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (!$AutoHotkeyPath) {
-    $AutoHotkeyPath = & (Join-Path $PSScriptRoot 'Get-AutoHotkeyPath.ps1')
+    $AutoHotkeyPath = & (Join-Path $PSScriptRoot 'get-autohotkey-path.ps1')
 }
 if (!(Test-Path -LiteralPath $AutoHotkeyPath)) {
     throw "AutoHotkey v2 was not found. Install it with Scoop or pass -AutoHotkeyPath."
@@ -23,22 +23,10 @@ if ([version]$actualVersion -lt [version]$requiredVersion -or
     throw "AutoHotkey $requiredVersion or newer v2 is required; found $actualVersion."
 }
 
-function Invoke-AutoHotkey([string[]]$Arguments, [string]$FailureMessage) {
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $AutoHotkeyPath
-    $startInfo.WorkingDirectory = Split-Path -Parent $Arguments[-1]
-    $startInfo.UseShellExecute = $false
-    foreach ($argument in $Arguments) {
-        [void]$startInfo.ArgumentList.Add($argument)
-    }
-
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
-    [void]$process.Start()
-    $process.WaitForExit()
-    if ($process.ExitCode -ne 0) {
-        throw "$FailureMessage with exit code $($process.ExitCode)."
-    }
+function Invoke-AutoHotkeyTest([string]$ScriptName) {
+    $probePath = Join-Path $PSScriptRoot 'probe-autohotkey-test.ps1'
+    & $probePath -ScriptPath $ScriptName `
+        -AutoHotkeyPath $AutoHotkeyPath -Force -TimeoutSeconds 15
 }
 
 function Assert-VirtualDesktopInstallerOption {
@@ -70,12 +58,8 @@ function Assert-VirtualDesktopInstallerOption {
 
 Assert-VirtualDesktopInstallerOption
 
-Invoke-AutoHotkey `
-    @('/ErrorStdOut', (Join-Path $projectRoot 'minwm-check.ahk')) `
-    'Module and configuration smoke test failed'
+Invoke-AutoHotkeyTest 'minwm-check.ahk'
+Invoke-AutoHotkeyTest 'minwm-tests.ahk'
+& (Join-Path $PSScriptRoot 'integration-test.ps1') -AutoHotkeyPath $AutoHotkeyPath
 
-Invoke-AutoHotkey `
-    @('/force', '/ErrorStdOut', (Join-Path $projectRoot 'minwm-tests.ahk')) `
-    'Unit tests failed'
-
-Write-Host "Validation and unit tests passed with AutoHotkey $actualVersion."
+Write-Host "Validation, unit, and integration tests passed with AutoHotkey $actualVersion."

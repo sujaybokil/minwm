@@ -10,17 +10,22 @@ InitializeVirtualDesktopState() {
         enabled: false,
         desktopIds: [],
         currentId: "",
+        pendingFocusHwnd: 0,
+        pendingFocusDesktopId: "",
+        lastFocusByDesktopId: Map(),
+        foregroundEventHook: 0,
+        foregroundEventCallback: 0,
         lastStatus: ""
     }
 }
 
 StartVirtualDesktopService() {
-    global VirtualDesktops
+    global Config, VirtualDesktops
     try {
         originalId := GetCurrentVirtualDesktopId()
         if (originalId = "")
             throw Error("Windows did not report a current virtual desktop")
-        EnsureVirtualDesktopCount(6)
+        EnsureVirtualDesktopCount(Config["virtualDesktopCount"])
         RefreshVirtualDesktopSnapshot()
         originalIndex := FindVirtualDesktopIndex(VirtualDesktops.desktopIds, originalId)
         if !originalIndex
@@ -29,13 +34,23 @@ StartVirtualDesktopService() {
             throw Error("could not restore the original virtual desktop")
         RefreshVirtualDesktopSnapshot()
         VirtualDesktops.enabled := true
-        SetTimer(PollVirtualDesktopChange, 250)
+        StartVirtualDesktopFocusTracking()
+        ; Explorer has no desktop-change event. Keep this short so both minwm
+        ; selectors and Ctrl+Win+Arrow restore focus without a visible pause.
+        SetTimer(PollVirtualDesktopChange, Config["virtualDesktopPollInterval"])
+        if (Config["startupVirtualDesktop"] != originalIndex) {
+            if !SwitchToVirtualDesktopIndex(Config["startupVirtualDesktop"])
+                throw Error("could not switch to configured startup virtual desktop")
+            DebugLog("Startup virtual desktop requested: D"
+                Config["startupVirtualDesktop"])
+        }
         DebugLog("Virtual desktops started; count=" VirtualDesktops.desktopIds.Length
             . "; current=" FindVirtualDesktopIndex(
                 VirtualDesktops.desktopIds, VirtualDesktops.currentId))
         return true
     } catch Error as err {
         VirtualDesktops.enabled := false
+        StopVirtualDesktopFocusTracking()
         SetTimer(PollVirtualDesktopChange, 0)
         DebugLog("Virtual desktops unavailable: " ErrorDescription(err))
         return false
@@ -45,6 +60,7 @@ StartVirtualDesktopService() {
 StopVirtualDesktopService(*) {
     global VirtualDesktops
     SetTimer(PollVirtualDesktopChange, 0)
+    StopVirtualDesktopFocusTracking()
     VirtualDesktops.enabled := false
 }
 
@@ -96,6 +112,65 @@ SwitchToVirtualWorkspace(workspaceNumber) {
         DebugLog("Virtual desktop switch accepted; awaiting desktop-change poll")
 }
 
+MoveFocusedWindowToVirtualWorkspace(workspaceNumber) {
+    global VirtualDesktops
+    if !VirtualDesktops.enabled || workspaceNumber < 1
+        return
+    hwnd := WinExist("A")
+    if !hwnd || !IsEligibleWindow(hwnd) {
+        DebugLog("Virtual desktop move ignored; no eligible focused window")
+        return
+    }
+    try RefreshVirtualDesktopSnapshot()
+    catch Error as err {
+        DebugLog("Virtual desktop move could not refresh state; " ErrorDescription(err))
+        return
+    }
+    if !IsWindowOnCurrentVirtualDesktop(hwnd) {
+        DebugLog("Virtual desktop move ignored; focused window is not on the current desktop")
+        return
+    }
+    if (workspaceNumber > VirtualDesktops.desktopIds.Length)
+        return
+    targetId := VirtualDesktops.desktopIds[workspaceNumber]
+    if (targetId = VirtualDesktops.currentId)
+        return
+    sourceArea := GetActiveMonitorArea()
+    try {
+        MoveWindowToVirtualDesktop(hwnd, targetId)
+
+        destination := GetWorkspaceMonitorState(targetId, sourceArea)
+        existingIndex := FindWindowIndex(destination.order, hwnd)
+        if existingIndex
+            destination.order.RemoveAt(existingIndex)
+        destination.order.InsertAt(1, hwnd)
+        constraintIndex := FindWindowIndex(destination.constraintFloats, hwnd)
+        if constraintIndex
+            destination.constraintFloats.RemoveAt(constraintIndex)
+        destination.lastLayoutState := ""
+        VirtualDesktops.pendingFocusHwnd := hwnd
+        VirtualDesktops.pendingFocusDesktopId := targetId
+        DebugLog("Virtual desktop move succeeded; hwnd=" hwnd "; workspace=" workspaceNumber)
+
+        if !SwitchToVirtualDesktopIndex(workspaceNumber) {
+            ClearPendingVirtualDesktopFocus()
+            DebugLog("Virtual desktop move switch failed; workspace=" workspaceNumber)
+            return
+        }
+    }
+    catch Error as err {
+        DebugLog("Virtual desktop move failed; hwnd=" hwnd "; workspace=" workspaceNumber
+            . "; " ErrorDescription(err))
+        return
+    }
+    currentIndex := FindVirtualDesktopIndex(
+        VirtualDesktops.desktopIds, VirtualDesktops.currentId)
+    if (currentIndex = workspaceNumber)
+        SynchronizeActiveVirtualWorkspace()
+    else
+        DebugLog("Virtual desktop move switch accepted; awaiting desktop-change poll")
+}
+
 SwitchToVirtualDesktopIndex(targetIndex) {
     global VirtualDesktops
     RefreshVirtualDesktopSnapshot()
@@ -106,6 +181,7 @@ SwitchToVirtualDesktopIndex(targetIndex) {
     if (currentIndex = targetIndex)
         return true
 
+    RememberForegroundVirtualDesktopFocus()
     HideFocusBorder("virtual-desktop-switch")
     switcherPath := GetVirtualDesktopSwitcherPath()
     if (switcherPath != "")
@@ -143,24 +219,12 @@ TrySwitchToVirtualDesktopDirect(switcherPath, targetIndex, previousId) {
         Run(BuildVirtualDesktopSwitchCommand(switcherPath, targetIndex),,
             "Hide", &processId)
         DebugLog("Direct virtual desktop helper launched; pid=" processId)
-        if !WaitForVirtualDesktopIdChange(previousId, 1500) {
-            ; The helper has already acknowledged the requested destination.
-            ; Explorer may publish the registry update after its process exits;
-            ; let the normal poller synchronize it rather than issuing sequential
-            ; Ctrl+Win shortcuts and reintroducing the animation.
-            DebugLog("Direct virtual desktop switch accepted; awaiting registry update; target="
-                . targetIndex)
-            return true
-        }
-        RefreshVirtualDesktopSnapshot()
-        actualIndex := FindVirtualDesktopIndex(
-            VirtualDesktops.desktopIds, VirtualDesktops.currentId)
-        if (actualIndex = targetIndex) {
-            DebugLog("Direct virtual desktop switch succeeded; target=" targetIndex)
-            return true
-        }
-        DebugLog("Direct virtual desktop switch accepted; registry still reports desktop="
-            . actualIndex "; target=" targetIndex)
+        ; Do not wait here: the helper switches asynchronously and Explorer can
+        ; publish its registry snapshot later. The 50 ms poller confirms it and
+        ; synchronizes focus without blocking this hotkey thread or falling back
+        ; to animated Ctrl+Win navigation.
+        DebugLog("Direct virtual desktop switch accepted; awaiting registry update; target="
+            . targetIndex)
         return true
     } catch Error as err {
         DebugLog("Direct virtual desktop switch failed; " ErrorDescription(err))
@@ -266,21 +330,136 @@ SynchronizeActiveVirtualWorkspace() {
 }
 
 FocusVirtualDesktopWindow() {
-    global Manager
-    for hwnd in Manager.order {
+    global Manager, VirtualDesktops
+    rememberedHwnd := VirtualDesktops.lastFocusByDesktopId.Has(VirtualDesktops.currentId)
+        ? VirtualDesktops.lastFocusByDesktopId[VirtualDesktops.currentId] : 0
+    pendingHwnd := 0
+    if (VirtualDesktops.pendingFocusDesktopId = VirtualDesktops.currentId) {
+        pendingHwnd := VirtualDesktops.pendingFocusHwnd
+        ClearPendingVirtualDesktopFocus()
+    }
+    for hwnd in BuildVirtualDesktopFocusCandidates(
+        pendingHwnd, rememberedHwnd, Manager.order) {
         if IsVirtualDesktopFocusCandidate(hwnd) {
             WinActivate("ahk_id " hwnd)
-            DebugLog("Virtual desktop focus restored; hwnd=" hwnd)
+            RememberVirtualDesktopFocus(hwnd)
+            source := (hwnd = pendingHwnd) ? "moved-window"
+                : (hwnd = rememberedHwnd) ? "remembered" : "workspace-order"
+            DebugLog("Virtual desktop focus restored; source=" source "; hwnd=" hwnd)
             return true
         }
     }
+    ; An empty workspace must leave Windows' focus choice alone. Forcing the
+    ; Explorer shell foreground during a desktop transition can race Explorer
+    ; and briefly destabilize the manager, especially after Discord/Electron
+    ; windows have been active on the source desktop.
     DebugLog("Virtual desktop focus unchanged; no eligible window")
     return false
 }
 
+BuildVirtualDesktopFocusCandidates(pendingHwnd, rememberedHwnd, order) {
+    candidates := []
+    AddVirtualDesktopFocusCandidate(candidates, pendingHwnd)
+    AddVirtualDesktopFocusCandidate(candidates, rememberedHwnd)
+    for hwnd in order
+        AddVirtualDesktopFocusCandidate(candidates, hwnd)
+    return candidates
+}
+
+AddVirtualDesktopFocusCandidate(candidates, hwnd) {
+    if !hwnd || FindWindowIndex(candidates, hwnd)
+        return
+    candidates.Push(hwnd)
+}
+
+ClearPendingVirtualDesktopFocus() {
+    global VirtualDesktops
+    VirtualDesktops.pendingFocusHwnd := 0
+    VirtualDesktops.pendingFocusDesktopId := ""
+}
+
+StartVirtualDesktopFocusTracking() {
+    global VirtualDesktops
+    static EVENT_SYSTEM_FOREGROUND := 0x0003
+    static WINEVENT_OUTOFCONTEXT := 0
+    static WINEVENT_SKIPOWNPROCESS := 0x2
+    try {
+        VirtualDesktops.foregroundEventCallback := CallbackCreate(
+            HandleVirtualDesktopForegroundChange, , 7)
+        VirtualDesktops.foregroundEventHook := DllCall(
+            "User32\SetWinEventHook",
+            "uint", EVENT_SYSTEM_FOREGROUND,
+            "uint", EVENT_SYSTEM_FOREGROUND,
+            "ptr", 0,
+            "ptr", VirtualDesktops.foregroundEventCallback,
+            "uint", 0,
+            "uint", 0,
+            "uint", WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            "ptr")
+        if !VirtualDesktops.foregroundEventHook
+            throw OSError(A_LastError, "SetWinEventHook virtual desktop focus")
+        RememberForegroundVirtualDesktopFocus()
+        DebugLog("Virtual desktop focus tracking enabled")
+    } catch Error as err {
+        StopVirtualDesktopFocusTracking()
+        DebugLog("Virtual desktop focus tracking unavailable: "
+            . ErrorDescription(err))
+    }
+}
+
+StopVirtualDesktopFocusTracking() {
+    global VirtualDesktops
+    if VirtualDesktops.foregroundEventHook {
+        try DllCall("User32\UnhookWinEvent",
+            "ptr", VirtualDesktops.foregroundEventHook)
+    }
+    if VirtualDesktops.foregroundEventCallback {
+        try CallbackFree(VirtualDesktops.foregroundEventCallback)
+    }
+    VirtualDesktops.foregroundEventHook := 0
+    VirtualDesktops.foregroundEventCallback := 0
+}
+
+HandleVirtualDesktopForegroundChange(eventHook, event, hwnd, idObject, idChild,
+    eventThread, eventTime) {
+    global VirtualDesktops
+    if !VirtualDesktops.enabled
+        return
+    ; Query from a normal AHK timer thread, after Windows has completed the
+    ; foreground transition, rather than from the WinEvent callback.
+    SetTimer(RememberForegroundVirtualDesktopFocus, -1)
+}
+
+RememberForegroundVirtualDesktopFocus(*) {
+    global VirtualDesktops
+    if !VirtualDesktops.enabled
+        return false
+    hwnd := WinExist("A")
+    if !hwnd || !IsFocusableWindow(hwnd)
+        return false
+    try desktopId := GetWindowVirtualDesktopId(hwnd)
+    catch Error as err {
+        DebugLog("Virtual desktop focus memory query failed; hwnd=" hwnd
+            . "; " ErrorDescription(err))
+        return false
+    }
+    if !FindVirtualDesktopIndex(VirtualDesktops.desktopIds, desktopId)
+        return false
+    VirtualDesktops.lastFocusByDesktopId[desktopId] := hwnd
+    return true
+}
+
+RememberVirtualDesktopFocus(hwnd) {
+    global VirtualDesktops
+    if !hwnd || (VirtualDesktops.currentId = "")
+        return false
+    VirtualDesktops.lastFocusByDesktopId[VirtualDesktops.currentId] := hwnd
+    return true
+}
+
 IsVirtualDesktopFocusCandidate(hwnd) {
     return hwnd && WinExist("ahk_id " hwnd)
-        && IsEligibleWindow(hwnd)
+        && IsFocusableWindow(hwnd)
         && IsWindowOnCurrentVirtualDesktop(hwnd)
 }
 
@@ -332,6 +511,16 @@ VirtualDesktopIdFromBuffer(buffer, offset := 0) {
     return id
 }
 
+VirtualDesktopIdToBuffer(desktopId) {
+    if (Type(desktopId) != "String" || !RegExMatch(desktopId, "i)^[0-9a-f]{32}$"))
+        throw Error("invalid virtual desktop id")
+    guidBuffer := Buffer(16, 0)
+    Loop 16
+        NumPut("UChar", Integer("0x" SubStr(desktopId, (A_Index - 1) * 2 + 1, 2)),
+            guidBuffer, A_Index - 1)
+    return guidBuffer
+}
+
 FindVirtualDesktopIndex(ids, desktopId) {
     for index, candidate in ids {
         if (candidate = desktopId)
@@ -370,6 +559,19 @@ GetWindowVirtualDesktopId(hwnd) {
         if (result != 0)
             throw OSError(result, "IVirtualDesktopManager.GetWindowDesktopId")
         return VirtualDesktopIdFromBuffer(desktopId)
+    } finally ObjRelease(manager)
+}
+
+MoveWindowToVirtualDesktop(hwnd, desktopId) {
+    static CLSID_VirtualDesktopManager := "{AA509086-5CA9-4C25-8F95-589D3C07B48A}"
+    static IID_IVirtualDesktopManager := "{A5CD92FF-29BE-454C-8D04-D82879FB3F1B}"
+    manager := CreateComInterface(CLSID_VirtualDesktopManager,
+        IID_IVirtualDesktopManager)
+    desktopGuid := VirtualDesktopIdToBuffer(desktopId)
+    try {
+        result := ComCall(5, manager, "ptr", hwnd, "ptr", desktopGuid, "int")
+        if (result != 0)
+            throw OSError(result, "IVirtualDesktopManager.MoveWindowToDesktop")
     } finally ObjRelease(manager)
 }
 

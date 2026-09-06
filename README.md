@@ -22,7 +22,11 @@ MIT License for anyone to use, modify, and share.
 - DWM visible-frame positioning for Electron and other custom-framed windows
 - Physical-pixel geometry across mixed-DPI monitors
 - Stable keyboard reordering and master promotion
-- Six Windows virtual-desktop workspaces with independent tiling state
+- Independent layouts and tiling order for every monitor on every virtual desktop
+- Directional focus and window movement across monitors
+- Grid and monocle layouts plus first-match application rules
+- Optional smart gaps that remove spacing for one tiled window
+- Configurable Windows virtual-desktop workspaces with independent tiling state
 - Configurable 1px white focused-window border (`0` disables it)
 - Lightweight tray controls, including a hotkey reference, and optional
   startup-at-logon setup
@@ -57,7 +61,8 @@ Build `minwm-setup.exe` with `.\tools\installer.ps1`. The installer:
 
 - requires an existing AutoHotkey v2 installation;
 - installs for the current user under `%LOCALAPPDATA%\minwm`;
-- preserves an existing `config\config.toml` during upgrades;
+- updates the shipped `config\default-config.toml` on upgrades while preserving
+  user settings in `%APPDATA%\minwm`;
 - offers a default-on **Virtual desktops** option that installs the helper for
   direct, non-animated workspace jumps; deselect it to use Windows shortcut
   switching instead;
@@ -74,8 +79,8 @@ The resulting installer is not currently code-signed, so Windows SmartScreen may
 unknown-publisher warning. Verify release downloads against the SHA-256 digest
 you calculate for the local build before sharing it.
 
-Uninstalling removes the installation directory, including its configuration
-and logs. Copy the `config` directory elsewhere first if you want to keep it.
+Uninstalling removes the installation directory but leaves `%APPDATA%\minwm`
+intact, including your overrides, layout state, custom hotkeys, and logs.
 
 ### Run from source
 
@@ -91,7 +96,7 @@ installed it another way.
 ## Keybindings
 
 All bindings except the fixed workspace selectors are configurable in
-`config\config.toml`. Restart minwm after editing the file.
+`%APPDATA%\minwm\config.toml`. Restart minwm after editing the file.
 
 Only normal, resizable, unowned top-level windows are tiled. Start, Windows
 Search, standard dialogs, modal frames, tool windows, owned transient windows,
@@ -99,23 +104,31 @@ and `WS_POPUP` windows are always excluded.
 
 | Default | Action |
 | --- | --- |
-| `Win+T` | Cycle vertical, horizontal, maximized, and floating layouts |
-| `Win+1` … `Win+6` | Switch to virtual desktop D1 … D6 |
+| `Win+T` | Cycle vertical, horizontal, grid, monocle, maximized, and floating layouts |
+| `Win+1` … `Win+N` | Switch to virtual desktop D1 … DN |
+| `Win+Shift+1` … `Win+Shift+N` | Move the focused window to D1 … DN, switch there, and focus it |
 | `Win+R` | Re-tile the active monitor |
 | `Win+[` / `Win+]` | Decrease / increase gaps |
 | `Win+Shift+[` / `Win+Shift+]` | Decrease / increase the master area |
 | `Win+J` / `Win+K` | Focus next / previous tiled window |
+| `Win+Alt+Arrow` | Focus the tiled window in that direction; cross monitors at an edge |
 | `Win+Shift+J` / `Win+Shift+K` | Move the focused window in tiling order |
+| `Win+Alt+Shift+Arrow` | Swap with the directional window or move to the adjacent monitor |
 | `Win+M` | Promote the focused window to master |
 | `Win+W` | Close the focused window |
+| `Win+F` | Temporarily float or tile the focused window |
+| `Alt+S` | Store, show, or hide the workspace scratchpad |
+| `Alt+T` | Return the workspace scratchpad to tiling |
+| `Win+Y` | Toggle gap removal when one window is tiled |
 | `Win+H` | Show the configured hotkey reference |
+| `Win+D` | Show or hide the virtual-desktop indicator |
 
 On startup, minwm preserves existing Windows virtual desktops and creates only
-enough new desktops to reach six. Each desktop keeps its own layout, gaps,
+enough new desktops to reach `virtualDesktopCount`. Each desktop keeps its own layout, gaps,
 master ratio, window order, and constraint-float state. A small translucent
-`D1`–`D6` indicator stays over the bottom-left of the primary taskbar. The workspace shortcuts
+desktop indicator stays over the bottom-left of the primary taskbar. The workspace switch and move shortcuts
 are fixed; other bindings remain configurable. On supported Windows 11 builds,
-switching directly from (for example) D1 to D6 does not visit intermediate
+switching directly from (for example) D1 to DN does not visit intermediate
 desktops or play their transitions.
 
 Floating mode is intentionally hands-off: minwm does not resize, maximize,
@@ -123,38 +136,90 @@ reorder, or focus windows through tiling controls, and hides the focused-window
 border. Maximized mode instead enforces maximization for every eligible window
 on the active monitor.
 
+`Win+F` temporarily removes an eligible tiled window from its layout and keeps
+its current size and position. Press it again to restore the window to tiling
+at its previous order position. This session-only state is not persisted and
+does not override an explicit floating window rule.
+
+`Alt+S` creates a scratchpad from the focused tiled window, hides it, and
+reflows the remaining layout. Later presses show and focus the stored window or
+hide it again. `Alt+T` returns it to tiling at its former order position. Each
+monitor and virtual desktop has one session-only scratchpad slot.
+
 ## Configuration
 
-`config\config.toml` supports the settings below. The parser intentionally implements
-only the TOML subset used by this file: strings, booleans, numbers, arrays of
-strings, and the `[hotkeys]` table.
+The complete, versioned baseline lives at `config\default-config.toml` in the
+repository and installed application. Create `%APPDATA%\minwm\config.toml` to
+override only the values you want to change; unspecified values continue to use
+the shipped defaults. The tray offers separate **Open default configuration**
+and **Open user configuration** actions; the user action is disabled until the
+file exists. **Reload configuration** restarts minwm immediately so the changed
+defaults, overrides, hotkeys, timers, and services take effect together. The
+parser intentionally implements only the TOML subset used by this file:
+strings, booleans, numbers, arrays of strings, and the `[hotkeys]` table.
 
 | Setting | Default | Purpose |
 | --- | ---: | --- |
 | `minWidth` | `320` | Ignore windows currently narrower than this |
 | `minHeight` | `220` | Ignore windows currently shorter than this |
 | `pollInterval` | `400` | Window refresh interval in milliseconds |
+| `windowRefreshEventDebounceMs` | `50` | Delay before event-triggered reflow; polling remains a fallback |
 | `defaultGap` | `12` | Initial outer and inner gap in pixels |
 | `gapStep` | `4` | Gap adjustment per hotkey press |
 | `minGap` | `0` | Lowest permitted gap |
-| `defaultLayout` | `vertical` | Initial layout for each virtual desktop: `vertical`, `horizontal`, `maximized`, or `floating` |
-| `virtualDesktopsEnabled` | `true` | Manage six Windows virtual-desktop workspaces and enable `Win+1` … `Win+6`; set `false` to disable this feature |
+| `smartGapsEnabled` | `true` | Initial smart-gap state; removes gaps for exactly one tiled window |
+| `defaultLayout` | `vertical` | Initial layout for each monitor: `vertical`, `horizontal`, `grid`, `monocle`, `maximized`, or `floating` |
+| `desktop1Layout` … `desktop9Layout` | `vertical` | Initial layout for D1 … D9 respectively. Set only the desktop entries you want to override; applied when that desktop/monitor workspace is first created |
+| `virtualDesktopsEnabled` | `true` | Manage the configured virtual-desktop workspaces; set `false` to disable this feature |
+| `virtualDesktopCount` | `6` | Number of virtual desktops to manage and create if needed (`1` through `9`); enables `Win+1` … `Win+N` selectors |
+| `startupVirtualDesktop` | `1` | Virtual desktop selected when minwm starts (`1` through `virtualDesktopCount`) |
+| `desktopIndicatorX` | `8` | Indicator X offset in pixels from the primary monitor's left edge |
+| `desktopIndicatorY` | `12` | Indicator Y offset in pixels from the primary monitor's bottom edge |
+| `desktopIndicatorWidth` | `44` | Indicator width in pixels |
+| `desktopIndicatorHeight` | `22` | Indicator height in pixels |
+| `desktopIndicatorBackgroundColor` | `202020` | Indicator background RGB color |
+| `desktopIndicatorTextColor` | `FFFFFF` | Indicator text RGB color |
+| `desktopIndicatorOpacity` | `185` | Indicator opacity (`0`–`255`) |
+| `desktopIndicatorFontSize` / `desktopIndicatorFontName` | `11` / `Segoe UI Semibold` | Indicator typography |
+| `desktopIndicatorPollInterval` | `1000` | Indicator position refresh interval in milliseconds |
 | `masterRatio` | `0.58` | Initial master share |
 | `masterRatioStep` | `0.04` | Master-share adjustment per hotkey press |
 | `minMasterRatio` | `0.30` | Lowest permitted master share |
 | `maxMasterRatio` | `0.75` | Highest permitted master share |
-| `debugLogPath` | `minwm-debug.log` | Diagnostic log path |
+| `logPath` | `%TEMP%\minwm.log` | Base path for session logs; an explicit `--log-path` is used exactly |
 | `debugMaxSizeMb` | `5` | Rotate the diagnostic log at this size |
 | `focusBorderWidth` | `1` | Focus border thickness; `0` disables it; tracks live moves and resizes |
 | `focusBorderColor` | `FFFFFF` | Focus border color as six-digit RGB hex |
+| `focusBorderLayouts` | `vertical`, `horizontal` | Layouts in which the focus border is shown; `[]` disables it |
+| `focusBorderPollInterval` | `33` | Focus-border polling fallback interval in milliseconds |
+| `layoutCycle` | all layouts | Ordered layouts used by the cycle hotkey |
+| `layoutCycleDebounceMs` | `120` | Coalescing delay for repeated layout-cycle presses |
+| `layoutNotificationsEnabled` / `layoutNotificationDurationMs` | `true` / `1000` | Whether layout tray notifications appear and their duration |
+| `layoutStateSaveDebounceMs` | `250` | Delay before persisting layout changes |
+| `virtualDesktopPollInterval` | `50` | Virtual-desktop change polling interval in milliseconds |
+| `customHotkeysEnabled` | `true` | Whether the custom-hotkey companion script may start |
 | `excludedClasses` | Windows shell/dialog classes | Window classes never tiled |
+| `ignoredProcesses` | Windows Start/Search hosts | Process names never tiled |
+| `floatingClasses` | `[]` | Window classes that always float |
+| `floatingProcesses` | `[]` | Process names that always float |
+| `floatingTitles` | `[]` | Exact window titles that always float |
 
-Invalid values fall back to safe defaults. Those corrections are written to the
-debug log when debug mode is enabled.
+Invalid values fall back to safe defaults. Those corrections are recorded in
+the session log.
+
+### Window rules and persisted layout settings
+
+Add `[[windowRules]]` tables to `%APPDATA%\minwm\config.toml` to set the initial treatment of applications. The
+first matching rule wins; supplied `process`, `class`, and `title` values are
+case-insensitive exact matches. `initialState` accepts `tile`, `floating`, and
+`ignore`; `desktop` accepts `1` through `virtualDesktopCount`; `monitor` accepts `primary` or a
+one-based monitor index. Layout, gaps, and master ratio are saved per desktop
+and monitor in `%APPDATA%\minwm\layout-state.ini`; window order is rebuilt from live
+windows after restart.
 
 ### Custom hotkeys
 
-Create `config\custom-hotkeys.ahk` beside `config.toml` to add custom bindings,
+Create `%APPDATA%\minwm\custom-hotkeys.ahk` beside `config.toml` to add custom bindings,
 such as shortcuts that launch applications. If the file is absent, minwm does
 not start a custom-hotkeys process.
 
@@ -167,7 +232,7 @@ For example:
 
 The script runs through the user's installed AutoHotkey runtime in a supervised
 companion process and exits with minwm. Bindings reserved by minwm's `[hotkeys]`
-table, plus the fixed `Win+1` … `Win+6` workspace shortcuts, are disabled in
+table, plus the fixed `Win+1` … `Win+N` workspace shortcuts, are disabled in
 the companion process, so built-in behavior can only be changed through TOML.
 It is arbitrary executable code, so only configure a script you trust.
 
@@ -195,16 +260,18 @@ re-measures once and corrects any residual caused by DPI changes or application
 
 ## Debugging
 
-Launch with diagnostic logging enabled:
+Every launch records lifecycle, action, layout-diff, workspace-transition, and
+error information. For an investigation, launch minwm with a known log path:
 
 ```powershell
-& "$(scoop prefix autohotkey)\v2\AutoHotkey64.exe" .\minwm.ahk --debug true
+& "$(scoop prefix autohotkey)\v2\AutoHotkey64.exe" .\minwm.ahk --log-path "D:\logs\minwm-investigation.log"
 ```
 
-Logs are written beside the script by default and rotate to
-`minwm-debug.log.1`. They record layout decisions, native constraints, and
-failed window moves. Window titles are not logged, but window handles can still
-help identify your session; review excerpts before posting them publicly.
+Without `--log-path`, each launch writes a fresh UUID-suffixed file in `%TEMP%`,
+such as `minwm-<uuid>.log`; its rotated archive uses the `.1` suffix. An explicit
+`--log-path "C:\path\to\minwm.log"` is used exactly; its parent directory is
+created when possible. Window titles are not logged, but window handles can
+still help identify your session; review excerpts before posting them publicly.
 
 For a useful bug report, include:
 
@@ -216,10 +283,10 @@ For a useful bug report, include:
 
 ## Development
 
-Run syntax validation and unit tests:
+Run the bounded smoke, unit, and reversible manager-integration suite:
 
 ```powershell
-.\tools\Test.ps1
+.\tools\tests.ps1
 ```
 
 Build the installer with AutoHotkey v2.0.26 or newer v2 and Inno Setup 6
@@ -239,16 +306,19 @@ The main modules are:
 | --- | --- |
 | `minwm.ahk` | Controller, hotkeys, tray, and refresh lifecycle |
 | `minwm-check.ahk` | Test-only module and configuration smoke-test entry point |
+| `tools/integration-test.ps1` | Reversible real-manager lifecycle test with isolated configuration and desktop-changing features disabled |
 | `config.ahk` | Minimal TOML loading and defaults |
 | `lib/windows.ahk` | Win32 discovery, geometry, DPI, and minimum sizes |
 | `lib/virtual-desktops.ahk` | Windows desktop discovery, provisioning, switching, and membership |
-| `lib/workspace-state.ahk` | Independent tiling state for each virtual desktop |
+| `lib/workspace-state.ahk` | Independent tiling state for each desktop and monitor |
+| `lib/layout-state.ahk` | Versioned persistence for per-monitor layout settings |
+| `lib/navigation.ahk` | Directional focus and window movement policy |
 | `lib/desktop-indicator.ahk` | Primary-taskbar workspace indicator |
 | `lib/layout-notification.ahk` | Transient layout-change confirmation |
 | `lib/constraints.ahk` | Pure fit and constrained-allocation algorithms |
 | `lib/selection.ahk` | Maps constraint decisions to real windows |
 | `lib/layouts.ahk` | Master-stack layout and window movement |
-| `lib/debug.ahk` | Opt-in diagnostics and log rotation |
+| `lib/debug.ahk` | Session logging, error formatting, and log rotation |
 | `lib/custom-hotkeys.ahk` | Supervised loading of custom hotkey scripts |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.

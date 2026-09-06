@@ -1,0 +1,13 @@
+# A sparse per-user override fixture. Values absent from this file must retain
+# their values from the shipped default configuration.
+pollInterval = 750
+desktop3Layout = "monocle"
+floatingClasses = []
+focusBorderLayouts = ["grid", "monocle"]
+
+[hotkeys]
+retile = "#q"
+
+[[windowRules]]
+process = "notepad.exe"
+initialState = "floating"
